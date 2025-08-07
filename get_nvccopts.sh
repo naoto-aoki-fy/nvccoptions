@@ -2,11 +2,11 @@
 
 set -e
 
-nvcc_options_fn=.nvcc_options
+nvcc_options_config_dir="${HOME}/.config/nvccoptions"
+mkdir -p ${nvcc_options_config_dir}
+nvcc_options_fn="${nvcc_options_config_dir}/nvccoptions.txt"
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
-
-if [[ -f .nvcc_options ]]; then
+if [[ -f "${nvcc_options_fn}" ]]; then
     cat "$nvcc_options_fn"
     exit
 fi
@@ -35,4 +35,4 @@ for word in "${mpicxx_output[@]}"; do
     esac
 done
 
-echo "${nvcc_options[@]}" | tee "$nvcc_options_fn"
+echo "${nvcc_options[@]}" | tee "${nvcc_options_fn}"
