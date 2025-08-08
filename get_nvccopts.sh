@@ -2,9 +2,7 @@
 
 set -e
 
-nvcc_options_config_dir="${HOME}/.config/nvccoptions"
-mkdir -p ${nvcc_options_config_dir}
-nvcc_options_fn="${nvcc_options_config_dir}/nvccoptions.txt"
+nvcc_options_fn="$(dirname "${BASH_SOURCE[0]}")/nvccoptions.txt"
 
 if [[ -f "${nvcc_options_fn}" ]]; then
     cat "$nvcc_options_fn"
