@@ -25,7 +25,7 @@ assert nvcc_argv[1] == "main.cu"
 
 nvcc_options : list = []
 for word in nvcc_argv[2:]:
-    if word == "nvc++" or word.endswith("-pthread"):
+    if word == "-pthread":
         continue
 
     if word.startswith("-Wl,"):
