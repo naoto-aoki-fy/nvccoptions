@@ -6,39 +6,47 @@ import subprocess
 import json
 import shlex
 
-nvcc_options_fn = os.path.dirname(__file__) + "/nvccoptions.txt"
+def main():
 
-if os.path.exists(nvcc_options_fn):
-    with open(nvcc_options_fn, "rb") as fp:
-        sys.stdout.buffer.write(fp.read())
-    sys.exit(0)
+    repo_dir = os.path.dirname(__file__)
+    nvcc_options_fn = os.path.join(repo_dir, "nvccoptions.txt")
+    fake_nvcxx = os.path.join(repo_dir, "fake_nvc++")
+    dummy_cu = "dummy.cu"
 
-path_saved = os.environ["PATH"]
-path_new = os.getcwd() + "/fake_nvcc:" + path_saved
-os.environ["PATH"] = path_new
+    if os.path.exists(nvcc_options_fn):
 
-mpicxx_output = subprocess.check_output(("mpicxx", "main.cu"))
-nvcc_argv = json.loads(mpicxx_output)
+        with open(nvcc_options_fn, "rb") as fp:
+            nvcc_options_join = fp.read()
 
-assert nvcc_argv[0].endswith("/nvc++")
-assert nvcc_argv[1] == "main.cu"
-
-nvcc_options : list = []
-for word in nvcc_argv[2:]:
-    if word == "-pthread":
-        continue
-
-    if word.startswith("-Wl,"):
-        parts = word.split(",")
-        for part in parts[1:]:
-            if part:
-                nvcc_options.extend(["-Xlinker", part])
     else:
-         nvcc_options.append(word)
 
+        environ = dict(os.environ)
+        environ["OMPI_CXX"] = fake_nvcxx
 
-nvcc_options_join = shlex.join(nvcc_options) + "\n"
-with open(nvcc_options_fn, "wt") as fp:
-    fp.write(nvcc_options_join)
+        mpicxx_output = subprocess.check_output(("mpicxx", dummy_cu), env=environ)
+        nvcc_argv = json.loads(mpicxx_output)
 
-sys.stdout.write(nvcc_options_join)
+        assert nvcc_argv[0] == fake_nvcxx
+        assert nvcc_argv[1] == dummy_cu
+
+        nvcc_options : list = []
+        for word in nvcc_argv[2:]:
+            if word == "-pthread":
+                continue
+
+            if word.startswith("-Wl,"):
+                parts = word.split(",")
+                for part in parts[1:]:
+                    if part:
+                        nvcc_options.extend(["-Xlinker", part])
+            else:
+                nvcc_options.append(word)
+
+        nvcc_options_join = os.fsencode(shlex.join(nvcc_options) + "\n")
+        with open(nvcc_options_fn, "wb") as fp:
+            fp.write(nvcc_options_join)
+
+    sys.stdout.buffer.write(nvcc_options_join)
+
+if __name__ == '__main__':
+    main()
