@@ -5,11 +5,13 @@ import os
 import subprocess
 import json
 import shlex
+import socket
 
 def main():
 
     repo_dir = os.path.dirname(__file__)
-    nvcc_options_fn = os.path.join(repo_dir, "nvccoptions.txt")
+    hostname = socket.gethostname()
+    nvcc_options_fn = os.path.join(repo_dir, f"nvccoptions_{hostname}.txt")
     fake_nvcxx = os.path.join(repo_dir, "fake_nvc++")
     dummy_cu = "dummy.cu"
 
