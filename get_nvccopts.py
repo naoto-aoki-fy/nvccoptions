@@ -7,11 +7,20 @@ import json
 import shlex
 import socket
 
+def get_machine_id():
+    etc_machineid = "/etc/machine-id"
+    if os.path.exists(etc_machineid):
+        with open(etc_machineid, "rt") as fp:
+            machine_id = fp.read().strip()
+    else:
+        machine_id = socket.gethostname()
+    return machine_id
+
 def main():
 
     repo_dir = os.path.dirname(__file__)
-    hostname = socket.gethostname()
-    nvcc_options_fn = os.path.join(repo_dir, f"nvccoptions_{hostname}.txt")
+    machine_id = get_machine_id()
+    nvcc_options_fn = os.path.join(repo_dir, f"nvccoptions_{machine_id}.txt")
     fake_nvcxx = os.path.join(repo_dir, "fake_nvc++")
     dummy_cu = "dummy.cu"
 

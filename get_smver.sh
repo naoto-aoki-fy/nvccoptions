@@ -6,9 +6,9 @@ ETC_MACHINEID="/etc/machine-id"
 if [[ -f "$ETC_MACHINEID" ]]; then
     MACHINE_ID=$(cat "$ETC_MACHINEID")
 else
-    MACHINE_ID="$(hostname -I)"
+    MACHINE_ID="$(hostname)"
 fi
-SMVER_PATH="${SCRIPT_DN}/smver.${MACHINE_ID}.txt"
+SMVER_PATH="${SCRIPT_DN}/smver_${MACHINE_ID}.txt"
 
 if [[ -f "$SMVER_PATH" ]]; then
     cat "$SMVER_PATH"
