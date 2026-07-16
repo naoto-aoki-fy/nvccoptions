@@ -9,9 +9,8 @@ for later reuse.
 ## Components
 
 - `gen_config.sh` - Bash wrapper for following python scripts
-  - `gen_nvccoptions.py` – Python script that generate NVCCOPTIONS and caches the result.
+  - `gen_nvccoptions.py` – Python script that generate `nvcc` options and caches the result.
   - `gen_gencode_flags.py` – Python script that generate NVCC_GENCODE_FLAGS and caches the result.
-- `fake_nvc++` – Minimal shim compiler used to intercept the arguments passed by `mpicxx`.
 
 ## Usage
 

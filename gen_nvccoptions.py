@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import print_function
+
 import argparse
 import json
 import os
@@ -17,13 +19,16 @@ def parse_args():
         )
     )
     parser.add_argument(
-        "-e", "--environment",
+        "-e",
+        "--environment",
         choices=("nvhpc", "cray"),
         default="nvhpc",
         help=(
             "Compiler environment to inspect. "
-            "'nvhpc' uses mpicxx with fake_nvc++ (default); "
-            "'cray' uses 'CC --cray-print-opts=all'."
+            "'nvhpc' uses 'mpicxx -showme:compile' and "
+            "'mpicxx -showme:link' (default); "
+            "'cray' uses 'CC --cray-print-opts=cflags' and "
+            "'CC --cray-print-opts=libs'."
         ),
     )
     parser.add_argument(
@@ -32,8 +37,9 @@ def parse_args():
         default="make",
         help=(
             "Output format. "
-            "'make' emits a Makefile variable assignment "
-            "(default); 'raw' emits only the options."
+            "'make' emits CFLAGS, LDFLAGS, and NVCC_LDFLAGS "
+            "Makefile assignments (default); "
+            "'raw' emits the three corresponding values, one per line."
         ),
     )
     parser.add_argument(
@@ -63,11 +69,30 @@ else:
         )
 
 
-def run_command(argv, env=None):
+def decode_utf8(data, description):
     try:
-        return subprocess.check_output(
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            "Failed to decode {} as UTF-8: {}".format(
+                description,
+                exc,
+            )
+        )
+
+
+def run_command(argv, env=None):
+    """
+    Execute a command and return its standard output as bytes.
+
+    Popen.communicate() is used instead of relying on newer
+    CalledProcessError attributes, for compatibility with Python 3.3.
+    """
+    try:
+        process = subprocess.Popen(
             argv,
             env=env,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
     except OSError as exc:
@@ -77,24 +102,21 @@ def run_command(argv, env=None):
                 exc,
             )
         )
-    except subprocess.CalledProcessError as exc:
-        # CalledProcessError.stderr is not available in all supported
-        # Python versions, including some Python 3.3 environments.
-        stderr = getattr(exc, "stderr", None)
 
-        if stderr is None:
-            stderr = getattr(exc, "output", None)
+    stdout_data, stderr_data = process.communicate()
 
-        if stderr:
-            stderr_text = stderr.decode(
+    if process.returncode != 0:
+        stderr_text = ""
+
+        if stderr_data:
+            stderr_text = stderr_data.decode(
                 "utf-8",
-                errors="replace",
+                "replace",
             ).strip()
-        else:
-            stderr_text = ""
 
-        message = "Command failed: {}".format(
-            shlex_join(argv)
+        message = "Command failed with status {}: {}".format(
+            process.returncode,
+            shlex_join(argv),
         )
 
         if stderr_text:
@@ -102,10 +124,42 @@ def run_command(argv, env=None):
 
         raise RuntimeError(message)
 
+    return stdout_data
+
+
+def strip_command_line_ending(output):
+    """
+    Remove the command's terminating line ending while rejecting embedded
+    newlines.
+
+    The returned text remains otherwise unchanged so CFLAGS and LDFLAGS
+    preserve the raw command output.
+    """
+    output = output.rstrip("\r\n")
+
+    if "\n" in output or "\r" in output:
+        raise RuntimeError(
+            "Compiler option output contains embedded newlines."
+        )
+
+    return output
+
+
+def get_command_output(argv):
+    output = run_command(argv)
+    output_text = decode_utf8(
+        output,
+        "the output of {!r}".format(
+            shlex_join(argv)
+        ),
+    )
+
+    return strip_command_line_ending(output_text)
+
 
 def normalize_options(options):
     """
-    Convert compiler-driver options into a form suitable for nvcc.
+    Convert compiler-driver linker options into a form suitable for nvcc.
 
     - Remove -pthread.
     - Convert:
@@ -133,102 +187,157 @@ def normalize_options(options):
     return normalized
 
 
-def get_nvhpc_options(repo_dir):
-    fake_nvcxx = os.path.join(
-        repo_dir,
-        "fake_nvc++",
-    )
-    dummy_cu = "dummy.cu"
-
-    environ = dict(os.environ)
-    environ["OMPI_CXX"] = fake_nvcxx
-
-    mpicxx_output = run_command(
-        ["mpicxx", dummy_cu],
-        env=environ,
-    )
-
+def normalize_linker_output(linker_output, command):
     try:
-        output_text = mpicxx_output.decode("utf-8")
-        nvcc_argv = json.loads(output_text)
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise RuntimeError(
-            "Failed to parse the output from fake_nvc++ as JSON: "
-            "{}".format(exc)
-        )
-
-    if not isinstance(nvcc_argv, list):
-        raise RuntimeError(
-            "The output from fake_nvc++ must be a JSON array."
-        )
-
-    if len(nvcc_argv) < 2:
-        raise RuntimeError(
-            "The output from fake_nvc++ contains too few arguments."
-        )
-
-    if nvcc_argv[0] != fake_nvcxx:
-        raise RuntimeError(
-            "Unexpected compiler in fake_nvc++ output: {!r}".format(
-                nvcc_argv[0]
-            )
-        )
-
-    if nvcc_argv[1] != dummy_cu:
-        raise RuntimeError(
-            "Unexpected source file in fake_nvc++ output: {!r}".format(
-                nvcc_argv[1]
-            )
-        )
-
-    return normalize_options(nvcc_argv[2:])
-
-
-def get_cray_options():
-    cray_output = run_command(
-        ["CC", "--cray-print-opts=all"]
-    )
-
-    try:
-        output_text = cray_output.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(
-            "Failed to decode the output of "
-            "'CC --cray-print-opts=all' as UTF-8: "
-            "{}".format(exc)
-        )
-
-    try:
-        cray_options = shlex.split(
-            output_text,
+        linker_options = shlex.split(
+            linker_output,
             comments=False,
             posix=True,
         )
     except ValueError as exc:
         raise RuntimeError(
-            "Failed to parse the output of "
-            "'CC --cray-print-opts=all': "
-            "{}".format(exc)
-        )
-
-    return normalize_options(cray_options)
-
-
-def generate_options(environment, repo_dir):
-    if environment == "nvhpc":
-        options = get_nvhpc_options(repo_dir)
-    elif environment == "cray":
-        options = get_cray_options()
-    else:
-        raise ValueError(
-            "Unsupported environment: {!r}".format(
-                environment
+            "Failed to parse the output of {!r}: {}".format(
+                command,
+                exc,
             )
         )
 
-    return os.fsencode(
-        shlex_join(options) + "\n"
+    return shlex_join(
+        normalize_options(linker_options)
     )
+
+
+def get_nvhpc_options():
+    compile_command = [
+        "mpicxx",
+        "-showme:compile",
+    ]
+    link_command = [
+        "mpicxx",
+        "-showme:link",
+    ]
+
+    cflags = get_command_output(compile_command)
+    ldflags = get_command_output(link_command)
+    nvcc_ldflags = normalize_linker_output(
+        ldflags,
+        shlex_join(link_command),
+    )
+
+    return {
+        "cflags": cflags,
+        "ldflags": ldflags,
+        "nvcc_ldflags": nvcc_ldflags,
+    }
+
+
+def get_cray_options():
+    compile_command = [
+        "CC",
+        "--cray-print-opts=cflags",
+    ]
+    link_command = [
+        "CC",
+        "--cray-print-opts=libs",
+    ]
+
+    cflags = get_command_output(compile_command)
+    ldflags = get_command_output(link_command)
+    nvcc_ldflags = normalize_linker_output(
+        ldflags,
+        shlex_join(link_command),
+    )
+
+    return {
+        "cflags": cflags,
+        "ldflags": ldflags,
+        "nvcc_ldflags": nvcc_ldflags,
+    }
+
+
+def generate_options(environment):
+    if environment == "nvhpc":
+        return get_nvhpc_options()
+
+    if environment == "cray":
+        return get_cray_options()
+
+    raise ValueError(
+        "Unsupported environment: {!r}".format(
+            environment
+        )
+    )
+
+
+def validate_options(options):
+    if not isinstance(options, dict):
+        raise RuntimeError(
+            "Cached options must be a JSON object."
+        )
+
+    required_keys = (
+        "cflags",
+        "ldflags",
+        "nvcc_ldflags",
+    )
+
+    for key in required_keys:
+        if key not in options:
+            raise RuntimeError(
+                "Cached options are missing {!r}.".format(
+                    key
+                )
+            )
+
+        if not isinstance(options[key], str):
+            raise RuntimeError(
+                "Cached option {!r} must be a string.".format(
+                    key
+                )
+            )
+
+        if "\n" in options[key] or "\r" in options[key]:
+            raise RuntimeError(
+                "Cached option {!r} contains embedded newlines.".format(
+                    key
+                )
+            )
+
+
+def load_options(filename):
+    try:
+        with open(filename, "rb") as fp:
+            encoded_options = fp.read()
+
+        options_text = decode_utf8(
+            encoded_options,
+            "cached options",
+        )
+        options = json.loads(options_text)
+    except ValueError as exc:
+        raise RuntimeError(
+            "Failed to parse cached options as JSON: {}".format(
+                exc
+            )
+        )
+
+    validate_options(options)
+    return options
+
+
+def save_options(filename, options):
+    validate_options(options)
+
+    options_text = json.dumps(
+        options,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+    )
+    options_text += "\n"
+
+    with open(filename, "wb") as fp:
+        fp.write(options_text.encode("utf-8"))
 
 
 def escape_makefile_value(value):
@@ -250,27 +359,27 @@ def escape_makefile_value(value):
     return value.replace("$", "$$").replace("#", "\\#")
 
 
-def format_output(options_joined, mode):
-    if mode == "raw":
-        return options_joined
+def format_output(options, mode):
+    validate_options(options)
 
-    try:
-        options_text = options_joined.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise RuntimeError(
-            "Failed to decode generated options as UTF-8: {}".format(
-                exc
-            )
+    if mode == "raw":
+        output_text = "{}\n{}\n{}\n".format(
+            options["cflags"],
+            options["ldflags"],
+            options["nvcc_ldflags"],
+        )
+    else:
+        output_text = (
+            "CFLAGS = {}\n"
+            "LDFLAGS = {}\n"
+            "NVCC_LDFLAGS = {}\n"
+        ).format(
+            escape_makefile_value(options["cflags"]),
+            escape_makefile_value(options["ldflags"]),
+            escape_makefile_value(options["nvcc_ldflags"]),
         )
 
-    # The cached raw representation normally ends in exactly one newline.
-    # Remove line endings before constructing the Makefile assignment.
-    options_text = options_text.rstrip("\r\n")
-    options_text = escape_makefile_value(options_text)
-
-    return (
-        "NVCCOPTIONS = {}\n".format(options_text)
-    ).encode("utf-8")
+    return output_text.encode("utf-8")
 
 
 def main():
@@ -283,7 +392,7 @@ def main():
 
     options_filename = os.path.join(
         repo_dir,
-        "nvccoptions_{}_{}.txt".format(
+        "compiler_options_{}_{}.json".format(
             machine_id,
             args.environment,
         ),
@@ -294,21 +403,18 @@ def main():
             os.path.exists(options_filename)
             and not args.refresh
         ):
-            with open(options_filename, "rb") as fp:
-                options_joined = fp.read()
+            options = load_options(options_filename)
         else:
-            options_joined = generate_options(
-                args.environment,
-                repo_dir,
+            options = generate_options(
+                args.environment
+            )
+            save_options(
+                options_filename,
+                options,
             )
 
-            # Always cache the raw representation. Output formatting is
-            # applied afterward so one cache can serve both modes.
-            with open(options_filename, "wb") as fp:
-                fp.write(options_joined)
-
         output = format_output(
-            options_joined,
+            options,
             args.mode,
         )
         sys.stdout.buffer.write(output)
