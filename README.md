@@ -8,16 +8,17 @@ for later reuse.
 
 ## Components
 
-- `get_nvccopts.py` – Python script that drives the discovery process and caches the result.
-- `get_nvccopts.sh` – Convenience wrapper that executes the Python helper.
+- `gen_config.sh` - Bash wrapper for following python scripts
+  - `gen_nvccoptions.py` – Python script that generate NVCCOPTIONS and caches the result.
+  - `gen_gencode_flags.py` – Python script that generate NVCC_GENCODE_FLAGS and caches the result.
 - `fake_nvc++` – Minimal shim compiler used to intercept the arguments passed by `mpicxx`.
 
 ## Usage
 
-Run the helper script to generate and print the `nvcc` options:
+Run the helper script to generate and have it written to a config file:
 
 ```bash
-./get_nvccopts.sh
+/path/to/gen_config.sh | tee /path/to/config.mk
 ```
 
 On the first run the script calls `mpicxx dummy.cu` to collect the options and writes them to
