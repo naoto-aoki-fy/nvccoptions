@@ -27,6 +27,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--mode",
+        choices=("make", "raw"),
+        default="make",
+        help=(
+            "Output format. "
+            "'make' emits a Makefile variable assignment "
+            "(default); 'raw' emits only the options."
+        ),
+    )
+    parser.add_argument(
         "--refresh",
         action="store_true",
         help="Ignore cached options and regenerate them.",
@@ -68,10 +78,12 @@ def run_command(argv, env=None):
             )
         )
     except subprocess.CalledProcessError as exc:
-        stderr = exc.output
+        # CalledProcessError.stderr is not available in all supported
+        # Python versions, including some Python 3.3 environments.
+        stderr = getattr(exc, "stderr", None)
 
-        if exc.stderr is not None:
-            stderr = exc.stderr
+        if stderr is None:
+            stderr = getattr(exc, "output", None)
 
         if stderr:
             stderr_text = stderr.decode(
@@ -219,6 +231,48 @@ def generate_options(environment, repo_dir):
     )
 
 
+def escape_makefile_value(value):
+    """
+    Escape text for use on the right-hand side of a Makefile variable
+    assignment.
+
+    Make interprets '$' as the start of a variable reference, so a literal
+    dollar sign must be written as '$$'.
+
+    Make also interprets an unescaped '#' as the start of a comment, even
+    when it appears inside shell quotes, so it must be escaped as '\\#'.
+    """
+    if "\n" in value or "\r" in value:
+        raise ValueError(
+            "Makefile output cannot contain embedded newlines."
+        )
+
+    return value.replace("$", "$$").replace("#", "\\#")
+
+
+def format_output(options_joined, mode):
+    if mode == "raw":
+        return options_joined
+
+    try:
+        options_text = options_joined.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            "Failed to decode generated options as UTF-8: {}".format(
+                exc
+            )
+        )
+
+    # The cached raw representation normally ends in exactly one newline.
+    # Remove line endings before constructing the Makefile assignment.
+    options_text = options_text.rstrip("\r\n")
+    options_text = escape_makefile_value(options_text)
+
+    return (
+        "NVCCOPTIONS = {}\n".format(options_text)
+    ).encode("utf-8")
+
+
 def main():
     args = parse_args()
 
@@ -248,10 +302,16 @@ def main():
                 repo_dir,
             )
 
+            # Always cache the raw representation. Output formatting is
+            # applied afterward so one cache can serve both modes.
             with open(options_filename, "wb") as fp:
                 fp.write(options_joined)
 
-        sys.stdout.buffer.write(options_joined)
+        output = format_output(
+            options_joined,
+            args.mode,
+        )
+        sys.stdout.buffer.write(output)
         return 0
 
     except (RuntimeError, OSError, ValueError) as exc:
