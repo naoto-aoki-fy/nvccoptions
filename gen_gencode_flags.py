@@ -3,9 +3,6 @@
 from __future__ import print_function
 
 import argparse
-import io
-import os
-import socket
 import subprocess
 import sys
 
@@ -14,42 +11,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Get NVIDIA GPU SM versions from compute capabilities."
     )
-    parser.add_argument(
-        "--mode",
-        choices=("make", "raw"),
-        default="make",
-        help=(
-            "Output format. "
-            "'make' prints NVCC_GENCODE_FLAGS, "
-            "while 'raw' prints one SM version per line. "
-            "Default: make."
-        ),
-    )
     return parser.parse_args()
-
-
-def read_text_file(path):
-    with io.open(path, mode="r", encoding="utf-8") as file_object:
-        return file_object.read()
-
-
-def write_text_file(path, content):
-    with io.open(path, mode="w", encoding="utf-8") as file_object:
-        file_object.write(content)
-
-
-def get_machine_id():
-    machine_id_path = "/etc/machine-id"
-
-    try:
-        if os.path.isfile(machine_id_path):
-            machine_id = read_text_file(machine_id_path).strip()
-            if machine_id:
-                return machine_id
-    except IOError:
-        pass
-
-    return socket.gethostname()
 
 
 def query_sm_versions():
@@ -123,109 +85,36 @@ def query_sm_versions():
     return sm_versions
 
 
-def read_cached_versions(cache_path):
-    if not os.path.isfile(cache_path):
-        return None
+def output_versions(versions):
+    flags = []
 
-    try:
-        content = read_text_file(cache_path)
-        versions = []
+    for version in sorted(set(versions)):
+        flags.append(
+            "-gencode=arch=compute_{0},code=sm_{0}".format(
+                version
+            )
+        )
 
-        for line in content.splitlines():
-            line = line.strip()
-
-            if line:
-                versions.append(int(line))
-
-        if versions:
-            return versions
-    except (IOError, ValueError):
-        pass
-
-    return None
-
-
-def write_cached_versions(cache_path, versions):
-    content = "".join(
-        "{0}\n".format(version) for version in versions
+    print(
+        "NVCC_GENCODE_FLAGS = {0}".format(
+            " ".join(flags)
+        )
     )
-    temporary_path = cache_path + ".tmp"
-
-    try:
-        write_text_file(temporary_path, content)
-
-        if os.path.exists(cache_path):
-            os.remove(cache_path)
-
-        os.rename(temporary_path, cache_path)
-    except OSError as exc:
-        try:
-            if os.path.exists(temporary_path):
-                os.remove(temporary_path)
-        except OSError:
-            pass
-
-        raise RuntimeError(
-            "Failed to write cache file {0}: {1}".format(
-                cache_path,
-                exc,
-            )
-        )
-
-
-def output_versions(versions, mode):
-    unique_versions = sorted(set(versions))
-
-    if mode == "make":
-        flags = []
-
-        for version in unique_versions:
-            flags.append(
-                "-gencode=arch=compute_{0},code=sm_{0}".format(
-                    version
-                )
-            )
-
-        print(
-            "NVCC_GENCODE_FLAGS = {0}".format(
-                " ".join(flags)
-            )
-        )
-    else:
-        for version in unique_versions:
-            print(version)
 
 
 def main():
-    args = parse_args()
+    parse_args()
 
     try:
-        script_path = os.path.abspath(__file__)
-    except NameError:
-        script_path = os.path.abspath(sys.argv[0])
+        versions = query_sm_versions()
+    except RuntimeError as exc:
+        print(
+            "error: {0}".format(exc),
+            file=sys.stderr,
+        )
+        return 1
 
-    script_directory = os.path.dirname(script_path)
-    machine_id = get_machine_id()
-    cache_filename = "smver_{0}.txt".format(machine_id)
-    cache_path = os.path.join(
-        script_directory,
-        cache_filename,
-    )
-
-    versions = read_cached_versions(cache_path)
-
-    if versions is None:
-        try:
-            versions = query_sm_versions()
-            write_cached_versions(cache_path, versions)
-        except RuntimeError as exc:
-            print(
-                "error: {0}".format(exc),
-                file=sys.stderr,
-            )
-            return 1
-
-    output_versions(versions, args.mode)
+    output_versions(versions)
     return 0
 
 

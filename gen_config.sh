@@ -38,5 +38,5 @@ while true; do
 done
 
 set -x
-python3 "${SCRIPT_DIR}/gen_gencode_flags.py" --mode make
-python3 "${SCRIPT_DIR}/gen_nvccoptions.py" --mode make --environment "$environment"
+python3 "${SCRIPT_DIR}/gen_gencode_flags.py"
+python3 "${SCRIPT_DIR}/gen_nvccoptions.py" --environment "$environment"

@@ -3,10 +3,8 @@
 from __future__ import print_function
 
 import argparse
-import json
 import os
 import shlex
-import socket
 import subprocess
 import sys
 
@@ -31,33 +29,7 @@ def parse_args():
             "'CC --cray-print-opts=libs'."
         ),
     )
-    parser.add_argument(
-        "--mode",
-        choices=("make", "raw"),
-        default="make",
-        help=(
-            "Output format. "
-            "'make' emits CFLAGS, LDFLAGS, and NVCC_LDFLAGS "
-            "Makefile assignments (default); "
-            "'raw' emits the three corresponding values, one per line."
-        ),
-    )
-    parser.add_argument(
-        "--refresh",
-        action="store_true",
-        help="Ignore cached options and regenerate them.",
-    )
     return parser.parse_args()
-
-
-def get_machine_id():
-    etc_machineid = "/etc/machine-id"
-
-    if os.path.exists(etc_machineid):
-        with open(etc_machineid, "rt") as fp:
-            return fp.read().strip()
-
-    return socket.gethostname()
 
 
 if hasattr(shlex, "join"):
@@ -272,7 +244,7 @@ def generate_options(environment):
 def validate_options(options):
     if not isinstance(options, dict):
         raise RuntimeError(
-            "Cached options must be a JSON object."
+            "Generated options must be a dictionary."
         )
 
     required_keys = (
@@ -284,60 +256,24 @@ def validate_options(options):
     for key in required_keys:
         if key not in options:
             raise RuntimeError(
-                "Cached options are missing {!r}.".format(
+                "Generated options are missing {!r}.".format(
                     key
                 )
             )
 
         if not isinstance(options[key], str):
             raise RuntimeError(
-                "Cached option {!r} must be a string.".format(
+                "Generated option {!r} must be a string.".format(
                     key
                 )
             )
 
         if "\n" in options[key] or "\r" in options[key]:
             raise RuntimeError(
-                "Cached option {!r} contains embedded newlines.".format(
+                "Generated option {!r} contains embedded newlines.".format(
                     key
                 )
             )
-
-
-def load_options(filename):
-    try:
-        with open(filename, "rb") as fp:
-            encoded_options = fp.read()
-
-        options_text = decode_utf8(
-            encoded_options,
-            "cached options",
-        )
-        options = json.loads(options_text)
-    except ValueError as exc:
-        raise RuntimeError(
-            "Failed to parse cached options as JSON: {}".format(
-                exc
-            )
-        )
-
-    validate_options(options)
-    return options
-
-
-def save_options(filename, options):
-    validate_options(options)
-
-    options_text = json.dumps(
-        options,
-        ensure_ascii=False,
-        sort_keys=True,
-        indent=2,
-    )
-    options_text += "\n"
-
-    with open(filename, "wb") as fp:
-        fp.write(options_text.encode("utf-8"))
 
 
 def escape_makefile_value(value):
@@ -359,25 +295,18 @@ def escape_makefile_value(value):
     return value.replace("$", "$$").replace("#", "\\#")
 
 
-def format_output(options, mode):
+def format_output(options):
     validate_options(options)
 
-    if mode == "raw":
-        output_text = "{}\n{}\n{}\n".format(
-            options["cflags"],
-            options["ldflags"],
-            options["nvcc_ldflags"],
-        )
-    else:
-        output_text = (
-            "CFLAGS = {}\n"
-            "LDFLAGS = {}\n"
-            "NVCC_LDFLAGS = {}\n"
-        ).format(
-            escape_makefile_value(options["cflags"]),
-            escape_makefile_value(options["ldflags"]),
-            escape_makefile_value(options["nvcc_ldflags"]),
-        )
+    output_text = (
+        "CFLAGS = {}\n"
+        "LDFLAGS = {}\n"
+        "NVCC_LDFLAGS = {}\n"
+    ).format(
+        escape_makefile_value(options["cflags"]),
+        escape_makefile_value(options["ldflags"]),
+        escape_makefile_value(options["nvcc_ldflags"]),
+    )
 
     return output_text.encode("utf-8")
 
@@ -385,38 +314,11 @@ def format_output(options, mode):
 def main():
     args = parse_args()
 
-    repo_dir = os.path.abspath(
-        os.path.dirname(__file__)
-    )
-    machine_id = get_machine_id()
-
-    options_filename = os.path.join(
-        repo_dir,
-        "compiler_options_{}_{}.json".format(
-            machine_id,
-            args.environment,
-        ),
-    )
-
     try:
-        if (
-            os.path.exists(options_filename)
-            and not args.refresh
-        ):
-            options = load_options(options_filename)
-        else:
-            options = generate_options(
-                args.environment
-            )
-            save_options(
-                options_filename,
-                options,
-            )
-
-        output = format_output(
-            options,
-            args.mode,
+        options = generate_options(
+            args.environment
         )
+        output = format_output(options)
         sys.stdout.buffer.write(output)
         return 0
 
