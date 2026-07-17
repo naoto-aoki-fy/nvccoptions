@@ -34,7 +34,7 @@ config_gencode.mk:
 	cat $@
 
 config.mk: config_vendor.mk config_gencode.mk
-	cat config_vendor.mk config_gencode.mk > $@
+	cat $^ > $@
 
 clean:
 	$(RM) -f dummy.o \
