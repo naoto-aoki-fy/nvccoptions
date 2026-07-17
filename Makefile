@@ -12,3 +12,7 @@ config_vendor.mk:
 
 config_gencode.mk:
 	$(PYTHON) $(CURDIR)/gencode_flags.py | tee $@
+
+.PHONY: clean
+clean:
+	$(RM) config_vendor.mk config_gencode.mk config.mk
