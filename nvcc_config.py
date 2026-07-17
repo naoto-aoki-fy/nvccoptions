@@ -38,6 +38,25 @@ LINK_OBJECT_SUFFIXES = (
     ".o",
 )
 
+# Compiler arguments that must not be written to CFLAGS or LDFLAGS.
+EXCLUDED_COMPILER_ARGUMENTS = frozenset([
+    "-cuda",
+    "-acc",
+])
+
+# Compiler options whose values must also be removed.
+#
+# Supported forms:
+#
+#   -tp=value
+#   -tp value
+#   -gpu=value
+#   -gpu value
+EXCLUDED_COMPILER_VALUE_OPTIONS = frozenset([
+    "-tp",
+    "-gpu",
+])
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -372,6 +391,53 @@ def format_arguments(arguments):
     return " ".join(result)
 
 
+def filter_excluded_compiler_arguments(arguments):
+    """
+    Remove nvc++-specific options that must not be written to CFLAGS,
+    LDFLAGS, or NVCC_LDFLAGS.
+
+    Removed forms:
+
+      - -cuda
+      - -acc
+      - -tp=value
+      - -tp value
+      - -gpu=value
+      - -gpu value
+
+    When -tp or -gpu appears without an inline value, the immediately
+    following argument is treated as its value and removed.
+    """
+    result = []
+    skip_next = False
+
+    for argument in arguments:
+        if skip_next:
+            skip_next = False
+            continue
+
+        if argument in EXCLUDED_COMPILER_ARGUMENTS:
+            continue
+
+        if argument in EXCLUDED_COMPILER_VALUE_OPTIONS:
+            skip_next = True
+            continue
+
+        excluded = False
+
+        for option in EXCLUDED_COMPILER_VALUE_OPTIONS:
+            if argument.startswith(option + "="):
+                excluded = True
+                break
+
+        if excluded:
+            continue
+
+        result.append(argument)
+
+    return result
+
+
 def normalize_nvcc_linker_arguments(arguments):
     """
     Convert compiler-driver linker arguments into a form suitable for nvcc.
@@ -509,7 +575,8 @@ def classify_invocation(argv):
 
 def filter_compile_arguments(arguments):
     """
-    Remove compile input items from the original compiler argv.
+    Remove compile input items and excluded nvc++ options from the
+    original compiler argv.
 
     Removed arguments:
 
@@ -517,11 +584,17 @@ def filter_compile_arguments(arguments):
       - *.c
       - *.cpp
       - *.cu
+      - -cuda
+      - -acc
+      - -tp=*
+      - -tp *
+      - -gpu=*
+      - -gpu *
     """
     result = []
 
     for argument in arguments:
-        if argument in ("-c", "-cuda", "-acc"):
+        if argument == "-c":
             continue
 
         if argument_has_suffix(argument, COMPILE_SOURCE_SUFFIXES):
@@ -529,16 +602,23 @@ def filter_compile_arguments(arguments):
 
         result.append(argument)
 
-    return result
+    return filter_excluded_compiler_arguments(result)
 
 
 def filter_link_arguments(arguments):
     """
-    Remove object-file inputs from the original linker argv.
+    Remove object-file inputs and excluded nvc++ options from the
+    original linker argv.
 
     Removed arguments:
 
       - *.o
+      - -cuda
+      - -acc
+      - -tp=*
+      - -tp *
+      - -gpu=*
+      - -gpu *
     """
     result = []
 
@@ -548,7 +628,7 @@ def filter_link_arguments(arguments):
 
         result.append(argument)
 
-    return result
+    return filter_excluded_compiler_arguments(result)
 
 
 def collect_stream(
