@@ -26,10 +26,12 @@ strace_link.json: strace_link.txt strace_exec_to_json.py
 config_vendor.mk: strace_compile.json strace_link.json nvcc_config.py
 	$(PYTHON) nvcc_config.py \
 		strace_compile.json \
-		strace_link.json | tee $@
+		strace_link.json > $@
+	cat $@
 
 config_gencode.mk:
-	$(PYTHON) gencode_flags.py | tee $@
+	$(PYTHON) gencode_flags.py > $@
+	cat $@
 
 config.mk: config_vendor.mk config_gencode.mk
 	cat config_vendor.mk config_gencode.mk > $@
