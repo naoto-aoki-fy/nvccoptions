@@ -7,7 +7,7 @@ PYTHON ?= python3
 
 all: config.mk
 
-strace_compile.txt: dummy.cu
+strace_compile.txt dummy.o: dummy.cu
 	unshare -Ur strace -f -v -s 1073741823 \
 		-e trace=execve,execveat \
 		$(MPICXX) $(CFLAGS) -c $< 2> $@

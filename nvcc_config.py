@@ -14,6 +14,8 @@ TARGET_EXECUTABLE = "nvc++"
 
 # Environment variable names that must never be written to config.mk.
 EXCLUDED_ENV_VARS = frozenset([
+    "HOME",
+    "HOSTNAME",
     "PWD",
     "SHLVL",
     "_",
@@ -24,6 +26,8 @@ EXCLUDED_ENV_VARS = frozenset([
 # Environment variable name prefixes that must never be written.
 EXCLUDED_ENV_VAR_PREFIXES = (
     "BASH_FUNC_",
+    "_LMFILES_",
+    "PJM_"
 )
 
 # Source-file suffixes used to identify compile commands.
