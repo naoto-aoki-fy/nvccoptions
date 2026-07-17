@@ -29,7 +29,7 @@ config_vendor.mk: strace_compile.json strace_link.json nvcc_config.py
 		strace_link.json | tee $@
 
 config_gencode.mk:
-	$(PYTHON) gencode_flags.py | tee $`
+	$(PYTHON) gencode_flags.py | tee $@
 
 config.mk: config_vendor.mk config_gencode.mk
 	cat config_vendor.mk config_gencode.mk > $@
