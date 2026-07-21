@@ -96,7 +96,7 @@ def output_versions(versions):
         )
 
     print(
-        "NVCC_GENCODE_FLAGS = {0}".format(
+        "GENCODE_FLAGS = {0}".format(
             " ".join(flags)
         )
     )

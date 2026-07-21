@@ -23,14 +23,14 @@ The default `make` target generates the following files:
 `config_vendor.mk` defines:
 
 ```make
-CFLAGS = ...
-LDFLAGS = ...
+CFLAGS_VENDOR = ...
+LDFLAGS_VENDOR = ...
 ```
 
 `config_gencode.mk` defines:
 
 ```make
-NVCC_GENCODE_FLAGS = ...
+GENCODE_FLAGS = ...
 ```
 
 ## Requirements
@@ -185,19 +185,19 @@ include /path/to/nvccoptions/config.mk
 NVCC ?= nvcc --forward-unknown-to-host-compiler
 
 kernel.o: kernel.cu
-	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
+	$(NVCC) $(CFLAGS_VENDOR) $(GENCODE_FLAGS) -c $< -o $@
 
 example: kernel.o
-	$(NVCC) $^ $(LDFLAGS) -o $@
+	$(NVCC) $^ $(LDFLAGS_VENDOR) -o $@
 ```
 
 The variables serve the following purposes:
 
-| Variable             | Purpose                                                                |
-| -------------------- | ---------------------------------------------------------------------- |
-| `CFLAGS`             | Compiler options reported by the selected compiler environment         |
-| `LDFLAGS`            | Original linker options reported by the selected compiler environment  |
-| `NVCC_GENCODE_FLAGS` | GPU architecture options such as `-gencode=arch=compute_80,code=sm_80` |
+| Variable        | Purpose                                                                |
+| --------------- | ---------------------------------------------------------------------- |
+| `CFLAGS_VENDOR` | Compiler options reported by the selected compiler environment         |
+| `LDFLAGS_VENDOR` | Original linker options reported by the selected compiler environment  |
+| `GENCODE_FLAGS` | GPU architecture options such as `-gencode=arch=compute_80,code=sm_80` |
 
 ## GPU architecture detection
 
@@ -212,10 +212,10 @@ Duplicate compute capabilities are removed, and one `-gencode` option is generat
 For example:
 
 ```make
-NVCC_GENCODE_FLAGS = -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_90,code=sm_90
+GENCODE_FLAGS = -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_90,code=sm_90
 ```
 
-Only architectures visible on the machine where `config_gencode.mk` is generated are included. Edit `NVCC_GENCODE_FLAGS` manually when additional target architectures are required.
+Only architectures visible on the machine where `config_gencode.mk` is generated are included. Edit `GENCODE_FLAGS` manually when additional target architectures are required.
 
 ## Regenerating configuration
 

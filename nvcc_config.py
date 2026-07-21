@@ -104,7 +104,7 @@ def strip_command_line_ending(output):
     Remove the command's terminating line ending while rejecting embedded
     newlines.
 
-    The returned text remains otherwise unchanged so CFLAGS and LDFLAGS
+    The returned text remains otherwise unchanged so CFLAGS_VENDOR and LDFLAGS_VENDOR
     preserve the raw command output.
     """
     output = output.rstrip("\r\n")
@@ -236,8 +236,8 @@ def format_output(options):
     validate_options(options)
 
     output_text = (
-        "CFLAGS = {}\n"
-        "LDFLAGS = {}\n"
+        "CFLAGS_VENDOR = {}\n"
+        "LDFLAGS_VENDOR = {}\n"
     ).format(
         escape_makefile_value(options["cflags"]),
         escape_makefile_value(options["ldflags"]),
