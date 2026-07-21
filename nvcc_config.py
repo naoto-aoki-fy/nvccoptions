@@ -45,11 +45,12 @@ def parse_args():
     )
     parser.add_argument(
         "--strace-wrapper-command",
-        default="mpicxx -cuda",
+        default=None,
         help=(
             "Shell-style compiler wrapper command prefix used by strace "
-            "mode before the generated probe arguments. The default is "
-            "'mpicxx -cuda'. Use 'CC' for HPE Cray environments."
+            "mode before the generated probe arguments. By default this "
+            "is inferred from --environment: 'mpicxx -cuda' for NVHPC "
+            "and 'CC' for HPE Cray."
         ),
     )
     return parser.parse_args()
@@ -604,9 +605,25 @@ def get_cray_options():
     }
 
 
-def generate_options(environment, mode, strace_wrapper_command):
+def default_mpicxx_command(environment):
+    if environment == "nvhpc":
+        return "mpicxx -cuda"
+
+    if environment == "cray":
+        return "CC"
+
+    raise ValueError(
+        "Unsupported environment: {!r}".format(
+            environment
+        )
+    )
+
+
+def generate_options(environment, mode, mpicxx_command):
     if mode == "strace":
-        wrapper_command = shlex.split(strace_wrapper_command)
+        if mpicxx_command is None:
+            mpicxx_command = default_mpicxx_command(environment)
+        wrapper_command = shlex.split(mpicxx_command)
         if not wrapper_command:
             raise RuntimeError("The strace wrapper command must not be empty.")
         return inspect_nvhpc_with_strace(wrapper_command)
