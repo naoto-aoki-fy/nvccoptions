@@ -1,4 +1,5 @@
 ENV ?= nvhpc
+MODE ?= wrapper
 PYTHON ?= python3
 
 .PHONY: all
@@ -9,7 +10,7 @@ config.mk: config_vendor.mk config_gencode.mk
 	cat $@
 
 config_vendor.mk:
-	$(PYTHON) $(CURDIR)/nvcc_config.py --environment $(ENV) > $@
+	$(PYTHON) $(CURDIR)/nvcc_config.py --environment $(ENV) --mode $(MODE) > $@
 	cat $@
 
 config_gencode.mk:

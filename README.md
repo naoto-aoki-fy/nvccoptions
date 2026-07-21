@@ -25,7 +25,12 @@ The default `make` target generates the following files:
 ```make
 CFLAGS_VENDOR = ...
 LDFLAGS_VENDOR = ...
+NVCXX_ENV_VENDOR = ...
 ```
+
+`NVCXX_ENV_VENDOR` is empty in the default wrapper-query mode. In strace mode,
+it contains shell-quoted `NAME=value` assignments for additional environment
+variables that were passed to `nvc++` by the MPI compiler wrapper.
 
 `config_gencode.mk` defines:
 
@@ -78,12 +83,29 @@ For the NVIDIA HPC SDK environment:
 make ENV=nvhpc
 ```
 
-The following commands are queried:
+The following commands are queried by default:
 
 ```text
 mpicxx -showme:compile
 mpicxx -showme:link
 ```
+
+To inspect the actual `nvc++` invocations made by `mpicxx`, use strace mode:
+
+```bash
+make ENV=nvhpc MODE=strace config_vendor.mk
+```
+
+This mode runs separate compile and link probes through:
+
+```text
+unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx ...
+```
+
+It extracts arguments from detected `nvc++` `execve`/`execveat` calls according
+to `strace-spec.md`, filters probe inputs and NVIDIA wrapper-only options, and
+writes additional `nvc++` environment variables to `NVCXX_ENV_VENDOR`. The host
+must permit unprivileged `unshare -Ur` and provide `strace`.
 
 ### HPE Cray Programming Environment
 
@@ -197,6 +219,7 @@ The variables serve the following purposes:
 | --------------- | ---------------------------------------------------------------------- |
 | `CFLAGS_VENDOR` | Compiler options reported by the selected compiler environment         |
 | `LDFLAGS_VENDOR` | Original linker options reported by the selected compiler environment  |
+| `NVCXX_ENV_VENDOR` | Additional shell-quoted `nvc++` environment assignments from strace mode |
 | `GENCODE_FLAGS` | GPU architecture options such as `-gencode=arch=compute_80,code=sm_80` |
 
 ## GPU architecture detection
