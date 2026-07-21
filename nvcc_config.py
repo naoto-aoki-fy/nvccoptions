@@ -42,7 +42,7 @@ LINK_OBJECT_SUFFIXES = (
     ".o",
 )
 
-# Compiler arguments that must not be written to CFLAGS or LDFLAGS.
+# Compiler arguments that must not be written to CFLAGS_VENDOR or LDFLAGS_VENDOR.
 EXCLUDED_COMPILER_ARGUMENTS = frozenset([
     "-cuda",
     "-acc",
@@ -397,8 +397,8 @@ def format_arguments(arguments):
 
 def filter_excluded_compiler_arguments(arguments):
     """
-    Remove nvc++-specific options that must not be written to CFLAGS
-    or LDFLAGS.
+    Remove nvc++-specific options that must not be written to CFLAGS_VENDOR
+    or LDFLAGS_VENDOR.
 
     Removed forms:
 
@@ -726,13 +726,13 @@ def write_config(
 
     write_make_variable(
         stream,
-        "LDFLAGS",
+        "LDFLAGS_VENDOR",
         link_arguments,
     )
 
     write_make_variable(
         stream,
-        "CFLAGS",
+        "CFLAGS_VENDOR",
         compile_arguments,
     )
 

@@ -13,14 +13,14 @@ Running `make` produces the following files:
 | File                | Description                                                                                                                                         |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `config_vendor.mk`  | Compiler options, linker options, and selected environment variables obtained from the traced `nvc++` invocations. |
-| `config_gencode.mk` | `NVCC_GENCODE_FLAGS` generated from the Compute Capabilities reported by `nvidia-smi`.                                                              |
+| `config_gencode.mk` | `GENCODE_FLAGS` generated from the Compute Capabilities reported by `nvidia-smi`.                                                                   |
 | `config.mk`         | The combined contents of `config_vendor.mk` and `config_gencode.mk`.                                                                                |
 
 `config_vendor.mk` defines variables such as:
 
 ```make
-CFLAGS := ...
-LDFLAGS := ...
+CFLAGS_VENDOR := ...
+LDFLAGS_VENDOR := ...
 ```
 
 It may also contain exported environment variables required by the detected NVIDIA HPC SDK or MPI configuration.
@@ -28,7 +28,7 @@ It may also contain exported environment variables required by the detected NVID
 `config_gencode.mk` defines:
 
 ```make
-NVCC_GENCODE_FLAGS = -gencode=arch=compute_XX,code=sm_XX ...
+GENCODE_FLAGS = -gencode=arch=compute_XX,code=sm_XX ...
 ```
 
 One `-gencode` option is generated for each distinct Compute Capability visible on the system.
@@ -129,13 +129,13 @@ For example:
 NVCC ?= nvcc --forward-unknown-to-host-compiler
 
 example.o: example.cu
-	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
+	$(NVCC) $(CFLAGS_VENDOR) $(GENCODE_FLAGS) -c $< -o $@
 
 example: example.o
-	$(NVCC) $(LDFLAGS) $^ -o $@
+	$(NVCC) $(LDFLAGS_VENDOR) $^ -o $@
 ```
 
-The exact integration depends on the consuming build system. Review the generated variables before adding them to an existing set of compiler or linker flags, especially when that build system already defines `CFLAGS` or `LDFLAGS`.
+The exact integration depends on the consuming build system. Review the generated variables before adding them to an existing set of compiler or linker flags.
 
 ## GPU-less build environments
 
