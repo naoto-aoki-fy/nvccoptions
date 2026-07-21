@@ -2,7 +2,7 @@
 
 `nvccoptions` extracts the compiler and linker options used internally by the NVIDIA HPC SDK MPI C++ wrapper and writes them as reusable GNU Make configuration files.
 
-The tool executes a small CUDA program through `mpicxx`, traces the resulting `execve` and `execveat` system calls, identifies the underlying `nvc++` invocations, and records their reusable compiler and linker arguments.
+The default mode executes a small CUDA program through `mpicxx`, traces the resulting `execve` and `execveat` system calls with `strace`, identifies the underlying `nvc++` invocations, and records their reusable compiler and linker arguments. As an alternative, the tool can run the same probe commands while using Python 3.6 and `psutil` to inspect the executing user's processes, find visible `nvc++` processes, and collect their startup options and environment variables.
 
 It also detects the Compute Capabilities of the visible NVIDIA GPUs and generates the corresponding `nvcc` `-gencode` options.
 
@@ -40,7 +40,8 @@ The configuration-generation environment requires:
 * Linux
 * GNU Make
 * Python 3
-* `strace`
+* `strace` for the default tracing mode
+* `psutil` when using `TRACE_MODE=psutil`
 * `unshare`, normally provided by `util-linux`
 * NVIDIA HPC SDK
 * An `mpicxx` command that eventually invokes `nvc++`
@@ -92,6 +93,12 @@ The default MPI compiler wrapper is `mpicxx`. Override `MPICXX` when a different
 
 ```bash
 make MPICXX=/path/to/nvidia/hpc_sdk/comm_libs/mpi/bin/mpicxx
+```
+
+The tracing mode defaults to `strace`. Use `TRACE_MODE=psutil` to run the probe commands under the psutil-based collector instead. This mode requires Python 3.6 or newer with `psutil` installed, retrieves processes owned by the executing user, selects visible `nvc++` processes, and records their command-line startup options and environment variables. Because it polls the process table, very short-lived `nvc++` processes may be missed on heavily loaded systems.
+
+```bash
+make TRACE_MODE=psutil
 ```
 
 The Python interpreter can be overridden in the same way:
@@ -183,7 +190,7 @@ strace_compile.json
 strace_link.json
 ```
 
-The text files contain the raw `strace` output. The JSON files contain parsed `execve` and `execveat` records and can be useful when diagnosing missing or unexpected compiler options.
+The text files contain the raw `strace` output when `TRACE_MODE=strace` is used. The JSON files contain parsed `execve` and `execveat` records in strace mode, or psutil process snapshots in psutil mode, and can be useful when diagnosing missing or unexpected compiler options.
 
 ## When to regenerate the files
 
@@ -201,6 +208,7 @@ Regenerate `config_gencode.mk` when the set of target GPU architectures changes.
 
 * The supplied tracing workflow is Linux-specific.
 * Only `nvc++` invocations are extracted.
+* `TRACE_MODE=psutil` depends on process-table polling and requires permission to read each matching process's command line and environment.
 * Compile invocations are recognized from `-c` and source files ending in `.c`, `.cpp`, or `.cu`.
 * Link invocations are recognized from object files ending in `.o`.
 * The generated configuration represents the observed wrapper behavior in the generation environment. It is not guaranteed to be portable to an unrelated NVIDIA HPC SDK, MPI, CUDA, or system configuration.
