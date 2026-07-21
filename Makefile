@@ -1,5 +1,5 @@
 MPICXX ?= mpicxx
-CFLAGS ?=
+CFLAGS ?= -cuda
 LDFLAGS ?= -cuda
 PYTHON ?= python3
 
