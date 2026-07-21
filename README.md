@@ -182,7 +182,7 @@ Include `config.mk` from your project's Makefile:
 ```make
 include /path/to/nvccoptions/config.mk
 
-NVCC ?= nvcc
+NVCC ?= nvcc --forward-unknown-to-host-compiler
 
 kernel.o: kernel.cu
 	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
