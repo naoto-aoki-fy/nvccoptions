@@ -142,6 +142,40 @@ def get_command_output(argv):
     return strip_command_line_ending(output_text)
 
 
+def strip_output_option(options_text, output_kind):
+    """
+    Remove compiler-generated output-file options from vendor flags.
+
+    Compile flags should not carry the probe object's ``-o *.o`` pair, while
+    linker flags should not carry any probe output ``-o *`` pair.  The caller
+    passes shell-style option text from a compiler wrapper, so parse it with
+    shlex and return normalized shell-quoted text.
+    """
+    args = shlex.split(options_text)
+    filtered = []
+    index = 0
+
+    while index < len(args):
+        arg = args[index]
+
+        if arg == "-o" and index + 1 < len(args):
+            output_path = args[index + 1]
+            if output_kind == "link" or output_path.endswith(".o"):
+                index += 2
+                continue
+
+        if arg.startswith("-o") and len(arg) > 2:
+            output_path = arg[2:]
+            if output_kind == "link" or output_path.endswith(".o"):
+                index += 1
+                continue
+
+        filtered.append(arg)
+        index += 1
+
+    return shlex_join(filtered)
+
+
 
 STRACE_STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 VALID_ENV_NAME_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
@@ -349,7 +383,7 @@ def filter_nvcxx_args(args, operation):
     skip_next = False
     source_suffixes = (".c", ".cpp", ".cu")
 
-    for arg in args:
+    for index, arg in enumerate(args):
         if skip_next:
             skip_next = False
             continue
@@ -361,6 +395,15 @@ def filter_nvcxx_args(args, operation):
             continue
         if arg.startswith("-tp=") or arg.startswith("-gpu="):
             continue
+        if arg == "-o" and index + 1 < len(args):
+            output_path = args[index + 1]
+            if operation == "link" or output_path.endswith(".o"):
+                skip_next = True
+                continue
+        if arg.startswith("-o") and len(arg) > 2:
+            output_path = arg[2:]
+            if operation == "link" or output_path.endswith(".o"):
+                continue
         if operation == "compile" and (arg == "-c" or arg.endswith(source_suffixes)):
             continue
         if operation == "link" and arg.endswith(".o"):
@@ -512,8 +555,14 @@ def get_nvhpc_options():
         "-showme:link",
     ]
 
-    cflags = get_command_output(compile_command)
-    ldflags = get_command_output(link_command)
+    cflags = strip_output_option(
+        get_command_output(compile_command),
+        "compile",
+    )
+    ldflags = strip_output_option(
+        get_command_output(link_command),
+        "link",
+    )
     return {
         "cflags": cflags,
         "ldflags": ldflags,
@@ -530,8 +579,14 @@ def get_cray_options():
         "--cray-print-opts=libs",
     ]
 
-    cflags = get_command_output(compile_command)
-    ldflags = get_command_output(link_command)
+    cflags = strip_output_option(
+        get_command_output(compile_command),
+        "compile",
+    )
+    ldflags = strip_output_option(
+        get_command_output(link_command),
+        "link",
+    )
     return {
         "cflags": cflags,
         "ldflags": ldflags,
