@@ -25,7 +25,6 @@ The default `make` target generates the following files:
 ```make
 CFLAGS = ...
 LDFLAGS = ...
-NVCC_LDFLAGS = ...
 ```
 
 `config_gencode.mk` defines:
@@ -33,8 +32,6 @@ NVCC_LDFLAGS = ...
 ```make
 NVCC_GENCODE_FLAGS = ...
 ```
-
-`NVCC_LDFLAGS` contains linker options normalized for use with `nvcc`. For example, compiler-driver options of the form `-Wl,...` are converted to `-Xlinker` options.
 
 ## Requirements
 
@@ -191,7 +188,7 @@ kernel.o: kernel.cu
 	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
 
 example: kernel.o
-	$(NVCC) $^ $(NVCC_LDFLAGS) -o $@
+	$(NVCC) $^ $(LDFLAGS) -o $@
 ```
 
 The variables serve the following purposes:
@@ -200,7 +197,6 @@ The variables serve the following purposes:
 | -------------------- | ---------------------------------------------------------------------- |
 | `CFLAGS`             | Compiler options reported by the selected compiler environment         |
 | `LDFLAGS`            | Original linker options reported by the selected compiler environment  |
-| `NVCC_LDFLAGS`       | Linker options converted into a form suitable for `nvcc`               |
 | `NVCC_GENCODE_FLAGS` | GPU architecture options such as `-gencode=arch=compute_80,code=sm_80` |
 
 ## GPU architecture detection

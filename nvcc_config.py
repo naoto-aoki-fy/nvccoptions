@@ -129,56 +129,6 @@ def get_command_output(argv):
     return strip_command_line_ending(output_text)
 
 
-def normalize_options(options):
-    """
-    Convert compiler-driver linker options into a form suitable for nvcc.
-
-    - Remove -pthread.
-    - Convert:
-          -Wl,option1,option2
-      into:
-          -Xlinker option1 -Xlinker option2
-    """
-    normalized = []
-
-    for word in options:
-        if word == "-pthread":
-            continue
-
-        if word.startswith("-Wl,"):
-            linker_options = word.split(",")[1:]
-
-            for linker_option in linker_options:
-                if linker_option:
-                    normalized.extend(
-                        ["-Xlinker", linker_option]
-                    )
-        else:
-            normalized.append(word)
-
-    return normalized
-
-
-def normalize_linker_output(linker_output, command):
-    try:
-        linker_options = shlex.split(
-            linker_output,
-            comments=False,
-            posix=True,
-        )
-    except ValueError as exc:
-        raise RuntimeError(
-            "Failed to parse the output of {!r}: {}".format(
-                command,
-                exc,
-            )
-        )
-
-    return shlex_join(
-        normalize_options(linker_options)
-    )
-
-
 def get_nvhpc_options():
     compile_command = [
         "mpicxx",
@@ -191,15 +141,9 @@ def get_nvhpc_options():
 
     cflags = get_command_output(compile_command)
     ldflags = get_command_output(link_command)
-    nvcc_ldflags = normalize_linker_output(
-        ldflags,
-        shlex_join(link_command),
-    )
-
     return {
         "cflags": cflags,
         "ldflags": ldflags,
-        "nvcc_ldflags": nvcc_ldflags,
     }
 
 
@@ -215,15 +159,9 @@ def get_cray_options():
 
     cflags = get_command_output(compile_command)
     ldflags = get_command_output(link_command)
-    nvcc_ldflags = normalize_linker_output(
-        ldflags,
-        shlex_join(link_command),
-    )
-
     return {
         "cflags": cflags,
         "ldflags": ldflags,
-        "nvcc_ldflags": nvcc_ldflags,
     }
 
 
@@ -250,7 +188,6 @@ def validate_options(options):
     required_keys = (
         "cflags",
         "ldflags",
-        "nvcc_ldflags",
     )
 
     for key in required_keys:
@@ -301,11 +238,9 @@ def format_output(options):
     output_text = (
         "CFLAGS = {}\n"
         "LDFLAGS = {}\n"
-        "NVCC_LDFLAGS = {}\n"
     ).format(
         escape_makefile_value(options["cflags"]),
         escape_makefile_value(options["ldflags"]),
-        escape_makefile_value(options["nvcc_ldflags"]),
     )
 
     return output_text.encode("utf-8")
