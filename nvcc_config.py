@@ -397,8 +397,8 @@ def format_arguments(arguments):
 
 def filter_excluded_compiler_arguments(arguments):
     """
-    Remove nvc++-specific options that must not be written to CFLAGS,
-    LDFLAGS, or NVCC_LDFLAGS.
+    Remove nvc++-specific options that must not be written to CFLAGS
+    or LDFLAGS.
 
     Removed forms:
 
@@ -440,41 +440,6 @@ def filter_excluded_compiler_arguments(arguments):
         result.append(argument)
 
     return result
-
-
-def normalize_nvcc_linker_arguments(arguments):
-    """
-    Convert compiler-driver linker arguments into a form suitable for nvcc.
-
-    Transformations:
-
-      - Remove -pthread.
-      - Convert:
-            -Wl,option1,option2
-        into:
-            -Xlinker option1 -Xlinker option2
-
-    The input and return values are lists of command-line arguments.
-    """
-    normalized = []
-
-    for argument in arguments:
-        if argument == "-pthread":
-            continue
-
-        if argument.startswith("-Wl,"):
-            linker_options = argument.split(",")[1:]
-
-            for linker_option in linker_options:
-                if linker_option:
-                    normalized.extend([
-                        "-Xlinker",
-                        linker_option,
-                    ])
-        else:
-            normalized.append(argument)
-
-    return normalized
 
 
 def is_same_as_current_environment(name, value):
@@ -759,20 +724,10 @@ def write_config(
     link_arguments = flatten_invocations(link_invocations)
     compile_arguments = flatten_invocations(compile_invocations)
 
-    nvcc_link_arguments = normalize_nvcc_linker_arguments(
-        link_arguments
-    )
-
     write_make_variable(
         stream,
         "LDFLAGS",
         link_arguments,
-    )
-
-    write_make_variable(
-        stream,
-        "NVCC_LDFLAGS",
-        nvcc_link_arguments,
     )
 
     write_make_variable(

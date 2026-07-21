@@ -2,7 +2,7 @@
 
 `nvccoptions` extracts the compiler and linker options used internally by the NVIDIA HPC SDK MPI C++ wrapper and writes them as reusable GNU Make configuration files.
 
-The tool executes a small CUDA program through `mpicxx`, traces the resulting `execve` and `execveat` system calls, identifies the underlying `nvc++` invocations, and converts their arguments into options that can be reused when invoking `nvcc` directly.
+The tool executes a small CUDA program through `mpicxx`, traces the resulting `execve` and `execveat` system calls, identifies the underlying `nvc++` invocations, and records their reusable compiler and linker arguments.
 
 It also detects the Compute Capabilities of the visible NVIDIA GPUs and generates the corresponding `nvcc` `-gencode` options.
 
@@ -12,7 +12,7 @@ Running `make` produces the following files:
 
 | File                | Description                                                                                                                                         |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config_vendor.mk`  | Compiler options, linker options, converted `nvcc` linker options, and selected environment variables obtained from the traced `nvc++` invocations. |
+| `config_vendor.mk`  | Compiler options, linker options, and selected environment variables obtained from the traced `nvc++` invocations. |
 | `config_gencode.mk` | `NVCC_GENCODE_FLAGS` generated from the Compute Capabilities reported by `nvidia-smi`.                                                              |
 | `config.mk`         | The combined contents of `config_vendor.mk` and `config_gencode.mk`.                                                                                |
 
@@ -21,7 +21,6 @@ Running `make` produces the following files:
 ```make
 CFLAGS := ...
 LDFLAGS := ...
-NVCC_LDFLAGS := ...
 ```
 
 It may also contain exported environment variables required by the detected NVIDIA HPC SDK or MPI configuration.
@@ -126,7 +125,7 @@ example.o: example.cu
 	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
 
 example: example.o
-	$(NVCC) $(NVCC_LDFLAGS) $^ -o $@
+	$(NVCC) $(LDFLAGS) $^ -o $@
 ```
 
 The exact integration depends on the consuming build system. Review the generated variables before adding them to an existing set of compiler or linker flags, especially when that build system already defines `CFLAGS` or `LDFLAGS`.
