@@ -99,7 +99,15 @@ To inspect the actual `nvc++` invocations made by `mpicxx`, use strace mode:
 make ENV=nvhpc MODE=strace config_vendor.mk
 ```
 
-If `unshare` or `strace` is unavailable, use psutil mode with Python 3.6 and
+If `unshare` or `strace` is unavailable, use seccomp mode to capture `execve`/`execveat` notifications with a small helper that follows the same extraction model as strace mode but uses Linux seccomp user notification instead of ptrace:
+
+```bash
+make ENV=nvhpc MODE=seccomp config_vendor.mk
+```
+
+seccomp mode compiles `seccomp_exec_logger.c` with `${CC:-cc}` into the system temporary directory, installs a seccomp user-notification filter for `execve` and `execveat`, reads the target argument and environment vectors while the syscall is paused, then allows the syscall to continue. It requires Linux seccomp user notification support, `SECCOMP_USER_NOTIF_FLAG_CONTINUE`, and permission to read the tracee memory through `process_vm_readv` or `/proc/<pid>/mem`.
+
+Alternatively, use psutil mode with Python 3.6 and
 the `psutil` module. This mode runs the same compile and link probes, repeatedly
 scans the executing user's process table, detects `nvc++` processes, and reads
 their startup command-line options and environment variables:
@@ -108,7 +116,7 @@ their startup command-line options and environment variables:
 make ENV=nvhpc MODE=psutil PYTHON=python3.6 config_vendor.mk
 ```
 
-This mode runs separate compile and link probes through the command configured
+Strace, seccomp, and psutil modes run separate compile and link probes through the command configured
 by `MPICXX`, which defaults to `mpicxx -cuda` for NVHPC and `CC` for HPE Cray:
 
 ```text
@@ -116,7 +124,7 @@ unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx -cuda ...
 ```
 
 Override `MPICXX` when the compiler wrapper needs a different command prefix in
-either strace or psutil mode. For example, select a custom NVHPC wrapper with:
+strace, seccomp, or psutil mode. For example, select a custom NVHPC wrapper with:
 
 ```bash
 make ENV=nvhpc MODE=strace MPICXX="mpicxx -cuda -gpu=cc80" config_vendor.mk
@@ -136,7 +144,7 @@ It extracts arguments from detected `nvc++` `execve`/`execveat` calls according
 to `strace-spec.md`, filters probe inputs and NVIDIA wrapper-only options, and
 writes additional `nvc++` environment variables as exported Makefile variables
 using their original names. The host must permit unprivileged `unshare -Ur` and
-provide `strace`. psutil mode does not require `unshare` or `strace`, but it can
+provide `strace` for strace mode. seccomp mode does not require `unshare` or `strace`, but it depends on kernel seccomp user notification support and readable tracee memory. psutil mode also does not require `unshare` or `strace`, but it can
 only observe processes visible to the executing user and depends on process
 visibility through `/proc`.
 

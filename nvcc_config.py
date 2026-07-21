@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -35,14 +36,17 @@ def parse_args():
     )
     parser.add_argument(
         "--mode",
-        choices=("wrapper", "strace", "psutil"),
+        choices=("wrapper", "strace", "seccomp", "psutil"),
         default="wrapper",
         help=(
             "Extraction mode. 'wrapper' queries compiler-wrapper print "
             "options (default). 'strace' runs the command selected by "
             "--strace-wrapper-command under unshare -Ur and strace to "
             "capture the nvc++ argv and environment described by "
-            "strace-spec.md. 'psutil' runs the same probes while polling "
+            "strace-spec.md. 'seccomp' runs the same probes under a "
+            "small seccomp user-notification exec logger based on the "
+            "strace execve/execveat capture methodology. 'psutil' runs "
+            "the same probes while polling "
             "the executing user's process table with Python 3.6 and psutil."
         ),
     )
@@ -50,8 +54,9 @@ def parse_args():
         "--strace-wrapper-command",
         default=None,
         help=(
-            "Shell-style compiler wrapper command prefix used by strace "
-            "or psutil mode before the generated probe arguments. By default "
+            "Shell-style compiler wrapper command prefix used by strace, "
+            "seccomp, or psutil mode before the generated probe arguments. "
+            "By default "
             "this is inferred from --environment: 'mpicxx -cuda' for NVHPC "
             "and 'CC' for HPE Cray."
         ),
@@ -540,6 +545,109 @@ def run_strace_command(argv):
     return stderr_text
 
 
+def build_seccomp_logger():
+    source_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "seccomp_exec_logger.c",
+    )
+    output_path = os.path.join(
+        tempfile.gettempdir(),
+        "nvccoptions-seccomp-exec-logger",
+    )
+    try:
+        source_mtime = os.path.getmtime(source_path)
+        output_mtime = os.path.getmtime(output_path)
+    except OSError:
+        source_mtime = 1
+        output_mtime = 0
+
+    if output_mtime >= source_mtime:
+        return output_path
+
+    command = [
+        os.environ.get("CC", "cc"),
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-o",
+        output_path,
+        source_path,
+    ]
+    run_command(command)
+    return output_path
+
+
+def parse_seccomp_records(stdout_text):
+    records = []
+    for line in stdout_text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError as exc:
+            raise RuntimeError(
+                "Could not parse seccomp notification record: {}".format(exc)
+            )
+        if (
+            not isinstance(record.get("argv"), list)
+            or not isinstance(record.get("env"), list)
+        ):
+            raise RuntimeError("Seccomp notification record has invalid shape.")
+        records.append(
+            {
+                "path": record.get("path", ""),
+                "argv": record["argv"],
+                "env": record["env"],
+            }
+        )
+    if not records:
+        raise RuntimeError(
+            "No execve or execveat records were captured by seccomp "
+            "user notification."
+        )
+    return records
+
+
+def run_seccomp_command(argv):
+    logger = build_seccomp_logger()
+    command = [logger] + argv
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "Failed to execute seccomp inspection command {!r}: {}".format(
+                command[0],
+                exc,
+            )
+        )
+
+    stdout_data, stderr_data = process.communicate()
+    stdout_text = stdout_data.decode("utf-8", "replace")
+    stderr_text = stderr_data.decode("utf-8", "replace")
+
+    if process.returncode != 0:
+        message = "Inspection command failed with status {}: {}".format(
+            process.returncode,
+            shlex_join(command),
+        )
+        if stderr_text.strip():
+            message += "\n{}".format(stderr_text.strip())
+        raise RuntimeError(message)
+
+    return parse_seccomp_records(stdout_text)
+
+
+def inspect_nvhpc_with_seccomp(wrapper_command):
+    def collect_records(command):
+        return run_seccomp_command(command)
+
+    return inspect_nvhpc_with_process_records(wrapper_command, collect_records)
+
+
 def inspect_nvhpc_with_strace(wrapper_command):
     def collect_records(command):
         return parse_strace_exec_records(run_strace_command(command))
@@ -769,12 +877,14 @@ def default_mpicxx_command(environment):
 
 
 def generate_options(environment, mode, mpicxx_command, psutil_poll_interval):
-    if mode in ("strace", "psutil"):
+    if mode in ("strace", "seccomp", "psutil"):
         if mpicxx_command is None or not mpicxx_command.strip():
             mpicxx_command = default_mpicxx_command(environment)
         wrapper_command = shlex.split(mpicxx_command)
         if mode == "strace":
             return inspect_nvhpc_with_strace(wrapper_command)
+        if mode == "seccomp":
+            return inspect_nvhpc_with_seccomp(wrapper_command)
         return inspect_nvhpc_with_psutil(wrapper_command, psutil_poll_interval)
 
     if environment == "nvhpc":

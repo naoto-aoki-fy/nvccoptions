@@ -72,6 +72,30 @@ unshare -Ur
 
 In containers, compute nodes, or Linux environments with hardened security settings, unprivileged user namespaces may be disabled.
 
+## 3.2 Observation Using seccomp User Notification
+
+The seccomp observation mode is based on the same syscall-selection methodology
+as the strace mode: observe successful `execve` and `execveat` calls, then parse
+the executable path, argument vector, and environment vector for each observed
+process. Instead of ptrace-based strace output, it starts the wrapper below a
+small supervisor/helper. The helper installs a seccomp BPF filter with
+`SECCOMP_FILTER_FLAG_NEW_LISTENER` that returns `SECCOMP_RET_USER_NOTIF` for
+`execve` and `execveat` and `SECCOMP_RET_ALLOW` for other syscalls.
+
+For each notification, the supervisor reads the syscall arguments from
+`struct seccomp_notif`, copies the pointed-to path, argv, and envp data from the
+paused task with `process_vm_readv` or `/proc/<pid>/mem`, emits one internal
+execution record, and replies with `SECCOMP_USER_NOTIF_FLAG_CONTINUE` so the
+original syscall proceeds normally. The resulting records are intentionally
+converted to the same internal process-record shape as strace records, so the
+classification, argument filtering, environment filtering, warnings, and output
+format below are shared with strace mode.
+
+This mode avoids the `unshare -Ur strace ...` dependency and directly uses the
+kernel's seccomp user-notification interface. It requires a Linux kernel and C
+library headers that expose seccomp user notification, support for continuing
+notified syscalls, and permission for the supervisor to read the tracee memory.
+
 ## 4. Classification of Compilation and Linking
 
 Each captured `nvc++` command shall be classified according to its arguments.
