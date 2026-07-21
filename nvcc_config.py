@@ -3,12 +3,14 @@
 from __future__ import print_function
 
 import argparse
+import importlib.util
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def parse_args():
@@ -33,14 +35,15 @@ def parse_args():
     )
     parser.add_argument(
         "--mode",
-        choices=("wrapper", "strace"),
+        choices=("wrapper", "strace", "psutil"),
         default="wrapper",
         help=(
             "Extraction mode. 'wrapper' queries compiler-wrapper print "
             "options (default). 'strace' runs the command selected by "
             "--strace-wrapper-command under unshare -Ur and strace to "
             "capture the nvc++ argv and environment described by "
-            "strace-spec.md."
+            "strace-spec.md. 'psutil' runs the same probes while polling "
+            "the executing user's process table with Python 3.6 and psutil."
         ),
     )
     parser.add_argument(
@@ -48,9 +51,18 @@ def parse_args():
         default=None,
         help=(
             "Shell-style compiler wrapper command prefix used by strace "
-            "mode before the generated probe arguments. By default this "
-            "is inferred from --environment: 'mpicxx -cuda' for NVHPC "
+            "or psutil mode before the generated probe arguments. By default "
+            "this is inferred from --environment: 'mpicxx -cuda' for NVHPC "
             "and 'CC' for HPE Cray."
+        ),
+    )
+    parser.add_argument(
+        "--psutil-poll-interval",
+        type=float,
+        default=0.01,
+        help=(
+            "Seconds to wait between process-table scans in psutil mode "
+            "(default: 0.01)."
         ),
     )
     return parser.parse_args()
@@ -453,6 +465,39 @@ def extract_env(entries, baseline_env):
     return result
 
 
+def run_observed_command(argv, observer):
+    """Run argv while repeatedly collecting process observations."""
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "Failed to execute inspection command {!r}: {}".format(
+                argv[0],
+                exc,
+            )
+        )
+
+    while process.poll() is None:
+        observer()
+
+    observer()
+    stdout_data, stderr_data = process.communicate()
+
+    if process.returncode != 0:
+        stderr_text = stderr_data.decode("utf-8", "replace")
+        message = "Inspection command failed with status {}: {}".format(
+            process.returncode,
+            shlex_join(argv),
+        )
+        if stderr_text.strip():
+            message += "\n{}".format(stderr_text.strip())
+        raise RuntimeError(message)
+
+
 def run_strace_command(argv):
     command = [
         "unshare",
@@ -496,11 +541,108 @@ def run_strace_command(argv):
 
 
 def inspect_nvhpc_with_strace(wrapper_command):
+    def collect_records(command):
+        return parse_strace_exec_records(run_strace_command(command))
+
+    return inspect_nvhpc_with_process_records(wrapper_command, collect_records)
+
+
+def inspect_nvhpc_with_psutil(wrapper_command, poll_interval):
+    def collect_records(command):
+        return run_psutil_command(command, poll_interval)
+
+    return inspect_nvhpc_with_process_records(wrapper_command, collect_records)
+
+
+
+def psutil_process_env_to_entries(process_env):
+    return [
+        "{}={}".format(name, value)
+        for name, value in process_env.items()
+    ]
+
+
+def load_psutil():
+    if importlib.util.find_spec("psutil") is None:
+        raise RuntimeError(
+            "psutil mode requires the psutil module for the selected Python interpreter."
+        )
+
+    return __import__("psutil")
+
+
+def collect_psutil_nvcxx_records(records, psutil):
+    current_uid = os.getuid()
+
+    for process in psutil.process_iter():
+        try:
+            uids = process.uids()
+            if uids.real != current_uid:
+                continue
+
+            argv = process.cmdline()
+            if not argv:
+                continue
+
+            names = [os.path.basename(argv[0])]
+            try:
+                exe = process.exe()
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                exe = ""
+            if exe:
+                names.append(os.path.basename(exe))
+
+            try:
+                name = process.name()
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                name = ""
+            if name:
+                names.append(os.path.basename(name))
+
+            if "nvc++" not in names:
+                continue
+
+            process_env = process.environ()
+            records.append({
+                "path": exe or argv[0],
+                "argv": argv,
+                "env": psutil_process_env_to_entries(process_env),
+            })
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
+            continue
+
+
+def run_psutil_command(argv, poll_interval):
+    psutil = load_psutil()
+    records = []
+
+    if poll_interval <= 0:
+        raise RuntimeError("psutil poll interval must be greater than zero.")
+
+    def observer():
+        collect_psutil_nvcxx_records(records, psutil)
+        time.sleep(poll_interval)
+
+    run_observed_command(argv, observer)
+
+    if not records:
+        print(
+            "warning: no nvc++ process was detected by psutil while running {}.".format(
+                shlex_join(argv),
+            ),
+            file=sys.stderr,
+        )
+
+    return records
+
+
+def inspect_nvhpc_with_process_records(wrapper_command, collect_records):
     compile_args = []
     link_args = []
     env_options = {}
     seen_compile = False
     seen_link = False
+    seen_record_keys = set()
 
     with tempfile.TemporaryDirectory(prefix="nvccoptions-") as workdir:
         source_path = os.path.join(workdir, "probe.cu")
@@ -516,12 +658,19 @@ def inspect_nvhpc_with_strace(wrapper_command):
         ]
 
         for command in commands:
-            stderr_text = run_strace_command(command)
-            records = parse_strace_exec_records(stderr_text)
+            records = collect_records(command)
 
             for record in records:
                 if not is_nvcxx_record(record):
                     continue
+
+                record_key = (
+                    tuple(record["argv"]),
+                    tuple(record["env"]),
+                )
+                if record_key in seen_record_keys:
+                    continue
+                seen_record_keys.add(record_key)
 
                 operation = classify_nvcxx_args(record["argv"][1:])
                 if operation is None:
@@ -619,12 +768,14 @@ def default_mpicxx_command(environment):
     )
 
 
-def generate_options(environment, mode, mpicxx_command):
-    if mode == "strace":
+def generate_options(environment, mode, mpicxx_command, psutil_poll_interval):
+    if mode in ("strace", "psutil"):
         if mpicxx_command is None or not mpicxx_command.strip():
             mpicxx_command = default_mpicxx_command(environment)
         wrapper_command = shlex.split(mpicxx_command)
-        return inspect_nvhpc_with_strace(wrapper_command)
+        if mode == "strace":
+            return inspect_nvhpc_with_strace(wrapper_command)
+        return inspect_nvhpc_with_psutil(wrapper_command, psutil_poll_interval)
 
     if environment == "nvhpc":
         return get_nvhpc_options()
@@ -747,6 +898,7 @@ def main():
             args.environment,
             args.mode,
             args.strace_wrapper_command,
+            args.psutil_poll_interval,
         )
         output = format_output(options)
         sys.stdout.buffer.write(output)

@@ -99,6 +99,15 @@ To inspect the actual `nvc++` invocations made by `mpicxx`, use strace mode:
 make ENV=nvhpc MODE=strace config_vendor.mk
 ```
 
+If `unshare` or `strace` is unavailable, use psutil mode with Python 3.6 and
+the `psutil` module. This mode runs the same compile and link probes, repeatedly
+scans the executing user's process table, detects `nvc++` processes, and reads
+their startup command-line options and environment variables:
+
+```bash
+make ENV=nvhpc MODE=psutil PYTHON=python3.6 config_vendor.mk
+```
+
 This mode runs separate compile and link probes through the command configured
 by `MPICXX`, which defaults to `mpicxx -cuda` for NVHPC and `CC` for HPE Cray:
 
@@ -106,12 +115,16 @@ by `MPICXX`, which defaults to `mpicxx -cuda` for NVHPC and `CC` for HPE Cray:
 unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx -cuda ...
 ```
 
-Override `MPICXX` when the compiler wrapper needs a different command prefix.
-For example, select a custom NVHPC wrapper with:
+Override `MPICXX` when the compiler wrapper needs a different command prefix in
+either strace or psutil mode. For example, select a custom NVHPC wrapper with:
 
 ```bash
 make ENV=nvhpc MODE=strace MPICXX="mpicxx -cuda -gpu=cc80" config_vendor.mk
 ```
+
+psutil mode also accepts `--psutil-poll-interval` through direct invocation of
+`nvcc_config.py` to tune the scan interval when short-lived `nvc++` processes are
+hard to catch.
 
 HPE Cray environments infer `MPICXX=CC` by default:
 
@@ -123,7 +136,9 @@ It extracts arguments from detected `nvc++` `execve`/`execveat` calls according
 to `strace-spec.md`, filters probe inputs and NVIDIA wrapper-only options, and
 writes additional `nvc++` environment variables as exported Makefile variables
 using their original names. The host must permit unprivileged `unshare -Ur` and
-provide `strace`.
+provide `strace`. psutil mode does not require `unshare` or `strace`, but it can
+only observe processes visible to the executing user and depends on process
+visibility through `/proc`.
 
 ### HPE Cray Programming Environment
 

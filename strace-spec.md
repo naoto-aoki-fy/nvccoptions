@@ -48,6 +48,22 @@ Since `strace` normally writes trace output to standard error, it shall be captu
 
 Using `unshare` and `strace` is **not** a mandatory implementation requirement. Any alternative observation method may be used, provided that it can obtain equivalent argument arrays and environment variables.
 
+## 3.1 Observation Using Python 3.6 and `psutil`
+
+The `psutil` observation mode executes each probe command directly and, while
+the command is running, repeatedly retrieves the list of processes owned by the
+executing user. For every visible process whose executable basename, process
+name basename, or `argv[0]` basename is `nvc++`, it collects:
+
+* The process command-line argument vector
+* The process environment variable mapping
+
+The captured command-line vector and environment mapping are then converted to
+the same internal process-record shape as the `strace` mode, so the
+classification, argument filtering, and environment filtering rules below apply
+unchanged. Because this mode observes live processes by polling, very short-lived
+`nvc++` processes may require a shorter polling interval.
+
 However, in environments using the current approach, unprivileged users must be permitted to execute:
 
 ```bash
