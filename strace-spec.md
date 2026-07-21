@@ -135,9 +135,13 @@ The implementation shall produce at least the following:
 
 * The extracted `nvc++` compilation argument list
 * The extracted `nvc++` linking argument list
-* Additional environment variables required to execute `nvc++`
+* Additional environment variables required to execute `nvc++`, emitted with their original names and exported
 
 Arguments shall be preserved in a representation that maintains argument boundaries, even when they contain whitespace or special characters.
+
+Environment variables shall be emitted as exported Makefile variables using
+their original names. They shall not be combined into a synthetic aggregate
+variable.
 
 ## 8. Warnings and Errors
 

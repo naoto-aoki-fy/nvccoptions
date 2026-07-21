@@ -622,34 +622,37 @@ def escape_makefile_value(value):
     return value.replace("$", "$$").replace("#", "\\#")
 
 
-def format_env_assignments(env_options):
-    assignments = []
+def format_env_exports(env_options):
+    lines = []
 
     for name in sorted(env_options):
-        assignments.append(
-            "{}={}".format(
+        lines.append(
+            "export {} = {}".format(
                 name,
-                env_options[name],
+                escape_makefile_value(env_options[name]),
             )
         )
 
-    return shlex_join(assignments)
+    return "\n".join(lines)
 
 
 def format_output(options):
     validate_options(options)
 
-    output_text = (
-        "CFLAGS_VENDOR = {}\n"
-        "LDFLAGS_VENDOR = {}\n"
-        "NVCXX_ENV_VENDOR = {}\n"
-    ).format(
-        escape_makefile_value(options["cflags"]),
-        escape_makefile_value(options["ldflags"]),
-        escape_makefile_value(
-            format_env_assignments(options.get("env", {}))
+    output_lines = [
+        "CFLAGS_VENDOR = {}".format(
+            escape_makefile_value(options["cflags"]),
         ),
-    )
+        "LDFLAGS_VENDOR = {}".format(
+            escape_makefile_value(options["ldflags"]),
+        ),
+    ]
+
+    env_exports = format_env_exports(options.get("env", {}))
+    if env_exports:
+        output_lines.append(env_exports)
+
+    output_text = "\n".join(output_lines) + "\n"
 
     return output_text.encode("utf-8")
 
