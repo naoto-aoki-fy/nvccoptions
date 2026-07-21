@@ -99,10 +99,18 @@ To inspect the actual `nvc++` invocations made by `mpicxx`, use strace mode:
 make ENV=nvhpc MODE=strace config_vendor.mk
 ```
 
-This mode runs separate compile and link probes through:
+This mode runs separate compile and link probes through the command configured
+by `STRACE_WRAPPER_COMMAND`, which defaults to `mpicxx -cuda`:
 
 ```text
-unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx ...
+unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx -cuda ...
+```
+
+Override `STRACE_WRAPPER_COMMAND` when the compiler wrapper needs a different
+command prefix. For example, HPE Cray environments can be inspected with:
+
+```bash
+make ENV=cray MODE=strace STRACE_WRAPPER_COMMAND=CC config_vendor.mk
 ```
 
 It extracts arguments from detected `nvc++` `execve`/`execveat` calls according

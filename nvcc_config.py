@@ -37,9 +37,19 @@ def parse_args():
         default="wrapper",
         help=(
             "Extraction mode. 'wrapper' queries compiler-wrapper print "
-            "options (default). 'strace' runs mpicxx under "
-            "unshare -Ur and strace to capture the nvc++ argv and "
-            "environment described by strace-spec.md."
+            "options (default). 'strace' runs the command selected by "
+            "--strace-wrapper-command under unshare -Ur and strace to "
+            "capture the nvc++ argv and environment described by "
+            "strace-spec.md."
+        ),
+    )
+    parser.add_argument(
+        "--strace-wrapper-command",
+        default="mpicxx -cuda",
+        help=(
+            "Shell-style compiler wrapper command prefix used by strace "
+            "mode before the generated probe arguments. The default is "
+            "'mpicxx -cuda'. Use 'CC' for HPE Cray environments."
         ),
     )
     return parser.parse_args()
@@ -484,7 +494,7 @@ def run_strace_command(argv):
     return stderr_text
 
 
-def inspect_nvhpc_with_strace():
+def inspect_nvhpc_with_strace(wrapper_command):
     compile_args = []
     link_args = []
     env_options = {}
@@ -500,8 +510,8 @@ def inspect_nvhpc_with_strace():
             source_file.write("int main() { return 0; }\n")
 
         commands = [
-            ["mpicxx", "-c", source_path, "-o", object_path],
-            ["mpicxx", object_path, "-o", binary_path],
+            wrapper_command + ["-c", source_path, "-o", object_path],
+            wrapper_command + [object_path, "-o", binary_path],
         ]
 
         for command in commands:
@@ -544,6 +554,7 @@ def inspect_nvhpc_with_strace():
         "ldflags": shlex_join(link_args),
         "env": env_options,
     }
+
 
 def get_nvhpc_options():
     compile_command = [
@@ -593,11 +604,12 @@ def get_cray_options():
     }
 
 
-def generate_options(environment, mode):
+def generate_options(environment, mode, strace_wrapper_command):
     if mode == "strace":
-        if environment != "nvhpc":
-            raise RuntimeError("The strace mode is currently supported only for the NVIDIA HPC SDK environment.")
-        return inspect_nvhpc_with_strace()
+        wrapper_command = shlex.split(strace_wrapper_command)
+        if not wrapper_command:
+            raise RuntimeError("The strace wrapper command must not be empty.")
+        return inspect_nvhpc_with_strace(wrapper_command)
 
     if environment == "nvhpc":
         return get_nvhpc_options()
@@ -719,6 +731,7 @@ def main():
         options = generate_options(
             args.environment,
             args.mode,
+            args.strace_wrapper_command,
         )
         output = format_output(options)
         sys.stdout.buffer.write(output)
