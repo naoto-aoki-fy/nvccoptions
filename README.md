@@ -119,7 +119,7 @@ include /path/to/config.mk
 For example:
 
 ```make
-NVCC ?= nvcc
+NVCC ?= nvcc --forward-unknown-to-host-compiler
 
 example.o: example.cu
 	$(NVCC) $(CFLAGS) $(NVCC_GENCODE_FLAGS) -c $< -o $@
