@@ -1,10 +1,5 @@
 ENV ?= nvhpc
 MODE ?= wrapper
-ifeq ($(ENV),cray)
-MPICXX ?= CC
-else
-MPICXX ?= mpicxx -cuda
-endif
 PYTHON ?= python3
 
 .PHONY: all

@@ -621,11 +621,9 @@ def default_mpicxx_command(environment):
 
 def generate_options(environment, mode, mpicxx_command):
     if mode == "strace":
-        if mpicxx_command is None:
+        if mpicxx_command is None or not mpicxx_command.strip():
             mpicxx_command = default_mpicxx_command(environment)
         wrapper_command = shlex.split(mpicxx_command)
-        if not wrapper_command:
-            raise RuntimeError("The strace wrapper command must not be empty.")
         return inspect_nvhpc_with_strace(wrapper_command)
 
     if environment == "nvhpc":
