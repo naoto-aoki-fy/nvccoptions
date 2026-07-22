@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import argparse
+import ctypes
 import importlib.util
 import json
 import os
@@ -545,101 +546,88 @@ def run_strace_command(argv):
     return stderr_text
 
 
-def build_seccomp_logger():
-    source_path = os.path.join(
+def load_seccomp_logger():
+    library_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "seccomp_exec_logger.c",
+        "libseccomp_exec_logger.so",
     )
-    output_path = os.path.join(
-        tempfile.gettempdir(),
-        "nvccoptions-seccomp-exec-logger",
+    if not os.path.exists(library_path):
+        raise RuntimeError(
+            "Seccomp logger shared library is missing: {}. "
+            "Build it with `make libseccomp_exec_logger.so`.".format(library_path)
+        )
+
+    callback_type = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_char_p),
+        ctypes.POINTER(ctypes.c_char_p),
+        ctypes.c_void_p,
     )
-    try:
-        source_mtime = os.path.getmtime(source_path)
-        output_mtime = os.path.getmtime(output_path)
-    except OSError:
-        source_mtime = 1
-        output_mtime = 0
-
-    if output_mtime >= source_mtime:
-        return output_path
-
-    command = [
-        os.environ.get("CC", "cc"),
-        "-O2",
-        "-Wall",
-        "-Wextra",
-        "-o",
-        output_path,
-        source_path,
+    library = ctypes.CDLL(library_path)
+    library.seccomp_exec_logger_run.argtypes = [
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_char_p),
+        callback_type,
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_size_t,
     ]
-    run_command(command)
-    return output_path
+    library.seccomp_exec_logger_run.restype = ctypes.c_int
+    return library, callback_type
 
 
-def parse_seccomp_records(stdout_text):
+def seccomp_c_vector_to_list(vector):
+    values = []
+    if not vector:
+        return values
+    index = 0
+    while vector[index]:
+        values.append(vector[index].decode("utf-8", "surrogateescape"))
+        index += 1
+    return values
+
+
+def run_seccomp_command(argv):
+    library, callback_type = load_seccomp_logger()
     records = []
-    for line in stdout_text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError as exc:
-            raise RuntimeError(
-                "Could not parse seccomp notification record: {}".format(exc)
-            )
-        if (
-            not isinstance(record.get("argv"), list)
-            or not isinstance(record.get("env"), list)
-        ):
-            raise RuntimeError("Seccomp notification record has invalid shape.")
+
+    def on_exec(syscall_name, path, exec_argv, exec_envp, user_data):
+        del syscall_name, user_data
         records.append(
             {
-                "path": record.get("path", ""),
-                "argv": record["argv"],
-                "env": record["env"],
+                "path": path.decode("utf-8", "surrogateescape") if path else "",
+                "argv": seccomp_c_vector_to_list(exec_argv),
+                "env": seccomp_c_vector_to_list(exec_envp),
             }
         )
+        return 0
+
+    callback = callback_type(on_exec)
+    encoded_argv = [arg.encode("utf-8", "surrogateescape") for arg in argv]
+    argv_array = (ctypes.c_char_p * (len(encoded_argv) + 1))()
+    for index, value in enumerate(encoded_argv):
+        argv_array[index] = value
+    argv_array[len(encoded_argv)] = None
+    errbuf = ctypes.create_string_buffer(4096)
+    status = library.seccomp_exec_logger_run(
+        len(encoded_argv), argv_array, callback, None, errbuf, len(errbuf)
+    )
+    if status != 0:
+        message = "Inspection command failed with status {}: {}".format(
+            status, shlex_join(argv)
+        )
+        error_text = errbuf.value.decode("utf-8", "replace")
+        if error_text:
+            message += "\n{}".format(error_text)
+        raise RuntimeError(message)
     if not records:
         raise RuntimeError(
             "No execve or execveat records were captured by seccomp "
             "user notification."
         )
     return records
-
-
-def run_seccomp_command(argv):
-    logger = build_seccomp_logger()
-    command = [logger] + argv
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except OSError as exc:
-        raise RuntimeError(
-            "Failed to execute seccomp inspection command {!r}: {}".format(
-                command[0],
-                exc,
-            )
-        )
-
-    stdout_data, stderr_data = process.communicate()
-    stdout_text = stdout_data.decode("utf-8", "replace")
-    stderr_text = stderr_data.decode("utf-8", "replace")
-
-    if process.returncode != 0:
-        message = "Inspection command failed with status {}: {}".format(
-            process.returncode,
-            shlex_join(command),
-        )
-        if stderr_text.strip():
-            message += "\n{}".format(stderr_text.strip())
-        raise RuntimeError(message)
-
-    return parse_seccomp_records(stdout_text)
-
 
 def inspect_nvhpc_with_seccomp(wrapper_command):
     def collect_records(command):

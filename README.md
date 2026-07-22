@@ -102,10 +102,11 @@ make ENV=nvhpc MODE=strace config_vendor.mk
 If `unshare` or `strace` is unavailable, use seccomp mode to capture `execve`/`execveat` notifications with a small helper that follows the same extraction model as strace mode but uses Linux seccomp user notification instead of ptrace:
 
 ```bash
+make libseccomp_exec_logger.so
 make ENV=nvhpc MODE=seccomp config_vendor.mk
 ```
 
-seccomp mode compiles `seccomp_exec_logger.c` with `${CC:-cc}` into the system temporary directory, installs a seccomp user-notification filter for `execve` and `execveat`, reads the target argument and environment vectors while the syscall is paused, then allows the syscall to continue. It requires Linux seccomp user notification support, `SECCOMP_USER_NOTIF_FLAG_CONTINUE`, and permission to read the tracee memory through `process_vm_readv` or `/proc/<pid>/mem`.
+seccomp mode loads `libseccomp_exec_logger.so` from Python 3.6 with `ctypes`. The shared library is built by the Makefile rule from `seccomp_exec_logger.c`; Python does not compile it. The library installs a seccomp user-notification filter for `execve` and `execveat`, passes the listener file descriptor with `SCM_RIGHTS`, reads the target argument and environment vectors with `process_vm_readv()` while the syscall is paused, and lets Python handle JSON generation, filtering, logging, option handling, storage, statistics, and downstream forwarding. It requires Linux seccomp user notification support, `SECCOMP_USER_NOTIF_FLAG_CONTINUE`, and permission to read the tracee memory through `process_vm_readv()`.
 
 Alternatively, use psutil mode with Python 3.6 and
 the `psutil` module. This mode runs the same compile and link probes, repeatedly
