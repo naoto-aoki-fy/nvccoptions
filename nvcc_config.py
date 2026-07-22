@@ -37,7 +37,7 @@ def parse_args():
     )
     parser.add_argument(
         "--mode",
-        choices=("wrapper", "strace", "seccomp", "psutil"),
+        choices=("wrapper", "strace", "seccomp", "agentsh", "sandlock", "psutil"),
         default="wrapper",
         help=(
             "Extraction mode. 'wrapper' queries compiler-wrapper print "
@@ -46,7 +46,9 @@ def parse_args():
             "capture the nvc++ argv and environment described by "
             "strace-spec.md. 'seccomp' runs the same probes under a "
             "small seccomp user-notification exec logger based on the "
-            "strace execve/execveat capture methodology. 'psutil' runs "
+            "strace execve/execveat capture methodology. 'agentsh' and "
+            "'sandlock' launch probes through the selected sandbox command "
+            "and collect records from /proc. 'psutil' runs "
             "the same probes while polling "
             "the executing user's process table with Python 3.6 and psutil."
         ),
@@ -56,10 +58,28 @@ def parse_args():
         default=None,
         help=(
             "Shell-style compiler wrapper command prefix used by strace, "
-            "seccomp, or psutil mode before the generated probe arguments. "
+            "seccomp, agentsh, sandlock, or psutil mode before the "
+            "generated probe arguments. "
             "By default "
             "this is inferred from --environment: 'mpicxx -cuda' for NVHPC "
             "and 'CC' for HPE Cray."
+        ),
+    )
+
+    parser.add_argument(
+        "--agentsh-command",
+        default="agentsh --",
+        help=(
+            "Shell-style agentsh command prefix used by agentsh mode before "
+            "the compiler wrapper command (default: 'agentsh --')."
+        ),
+    )
+    parser.add_argument(
+        "--sandlock-command",
+        default="sandlock run --",
+        help=(
+            "Shell-style Sandlock command prefix used by sandlock mode before "
+            "the compiler wrapper command (default: 'sandlock run --')."
         ),
     )
     parser.add_argument(
@@ -67,8 +87,8 @@ def parse_args():
         type=float,
         default=0.01,
         help=(
-            "Seconds to wait between process-table scans in psutil mode "
-            "(default: 0.01)."
+            "Seconds to wait between process-table scans in agentsh, "
+            "sandlock, and psutil modes (default: 0.01)."
         ),
     )
     return parser.parse_args()
@@ -589,7 +609,7 @@ def seccomp_c_vector_to_list(vector):
     return values
 
 
-def run_seccomp_command(argv):
+def run_seccomp_command(argv, command_prefix=None):
     library, callback_type = load_seccomp_logger()
     records = []
 
@@ -605,7 +625,8 @@ def run_seccomp_command(argv):
         return 0
 
     callback = callback_type(on_exec)
-    encoded_argv = [arg.encode("utf-8", "surrogateescape") for arg in argv]
+    command = list(command_prefix or []) + list(argv)
+    encoded_argv = [arg.encode("utf-8", "surrogateescape") for arg in command]
     argv_array = (ctypes.c_char_p * (len(encoded_argv) + 1))()
     for index, value in enumerate(encoded_argv):
         argv_array[index] = value
@@ -616,7 +637,7 @@ def run_seccomp_command(argv):
     )
     if status != 0:
         message = "Inspection command failed with status {}: {}".format(
-            status, shlex_join(argv)
+            status, shlex_join(command)
         )
         error_text = errbuf.value.decode("utf-8", "replace")
         if error_text:
@@ -649,6 +670,103 @@ def inspect_nvhpc_with_psutil(wrapper_command, poll_interval):
 
     return inspect_nvhpc_with_process_records(wrapper_command, collect_records)
 
+
+def inspect_nvhpc_with_proc_prefix(wrapper_command, command_prefix, poll_interval):
+    prefix = shlex.split(command_prefix)
+    if not prefix:
+        raise RuntimeError("sandbox command prefix must not be empty.")
+
+    def collect_records(command):
+        return run_proc_command(prefix + command, poll_interval)
+
+    return inspect_nvhpc_with_process_records(wrapper_command, collect_records)
+
+
+def read_proc_null_separated(path):
+    try:
+        with open(path, "rb") as proc_file:
+            data = proc_file.read()
+    except OSError:
+        return []
+
+    if not data:
+        return []
+
+    if data.endswith(b"\0"):
+        data = data[:-1]
+
+    return [
+        value.decode("utf-8", "surrogateescape")
+        for value in data.split(b"\0")
+        if value
+    ]
+
+
+def collect_proc_nvcxx_records(records):
+    current_uid = os.getuid()
+
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+
+        proc_path = os.path.join("/proc", name)
+        try:
+            if os.stat(proc_path).st_uid != current_uid:
+                continue
+        except OSError:
+            continue
+
+        argv = read_proc_null_separated(os.path.join(proc_path, "cmdline"))
+        if not argv:
+            continue
+
+        names = [os.path.basename(argv[0])]
+        try:
+            exe = os.readlink(os.path.join(proc_path, "exe"))
+        except OSError:
+            exe = ""
+        if exe:
+            names.append(os.path.basename(exe))
+
+        try:
+            with open(os.path.join(proc_path, "comm"), "r") as comm_file:
+                comm = comm_file.read().strip()
+        except OSError:
+            comm = ""
+        if comm:
+            names.append(os.path.basename(comm))
+
+        if "nvc++" not in names:
+            continue
+
+        records.append({
+            "path": exe or argv[0],
+            "argv": argv,
+            "env": read_proc_null_separated(os.path.join(proc_path, "environ")),
+        })
+
+
+def run_proc_command(argv, poll_interval):
+    records = []
+
+    if poll_interval <= 0:
+        raise RuntimeError("process-table poll interval must be greater than zero.")
+
+    def observer():
+        collect_proc_nvcxx_records(records)
+        time.sleep(poll_interval)
+
+    run_observed_command(argv, observer)
+
+    if not records:
+        print(
+            "warning: no nvc++ process was detected while running {}.".format(
+                shlex_join(argv),
+            ),
+            file=sys.stderr,
+        )
+
+    return records
 
 
 def psutil_process_env_to_entries(process_env):
@@ -864,8 +982,11 @@ def default_mpicxx_command(environment):
     )
 
 
-def generate_options(environment, mode, mpicxx_command, psutil_poll_interval):
-    if mode in ("strace", "seccomp", "psutil"):
+def generate_options(
+    environment, mode, mpicxx_command, psutil_poll_interval,
+    agentsh_command, sandlock_command
+):
+    if mode in ("strace", "seccomp", "agentsh", "sandlock", "psutil"):
         if mpicxx_command is None or not mpicxx_command.strip():
             mpicxx_command = default_mpicxx_command(environment)
         wrapper_command = shlex.split(mpicxx_command)
@@ -873,6 +994,14 @@ def generate_options(environment, mode, mpicxx_command, psutil_poll_interval):
             return inspect_nvhpc_with_strace(wrapper_command)
         if mode == "seccomp":
             return inspect_nvhpc_with_seccomp(wrapper_command)
+        if mode == "agentsh":
+            return inspect_nvhpc_with_proc_prefix(
+                wrapper_command, agentsh_command, psutil_poll_interval
+            )
+        if mode == "sandlock":
+            return inspect_nvhpc_with_proc_prefix(
+                wrapper_command, sandlock_command, psutil_poll_interval
+            )
         return inspect_nvhpc_with_psutil(wrapper_command, psutil_poll_interval)
 
     if environment == "nvhpc":
@@ -997,6 +1126,8 @@ def main():
             args.mode,
             args.strace_wrapper_command,
             args.psutil_poll_interval,
+            args.agentsh_command,
+            args.sandlock_command,
         )
         output = format_output(options)
         sys.stdout.buffer.write(output)

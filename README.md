@@ -108,6 +108,22 @@ make ENV=nvhpc MODE=seccomp config_vendor.mk
 
 seccomp mode loads `libseccomp_exec_logger.so` from Python 3.6 with `ctypes`. The shared library is built by the Makefile rule from `seccomp_exec_logger.c`; Python does not compile it. The library installs a seccomp user-notification filter for `execve` and `execveat`, passes the listener file descriptor with `SCM_RIGHTS`, reads the target argument and environment vectors with `process_vm_readv()` while the syscall is paused, and lets Python handle JSON generation, filtering, logging, option handling, storage, statistics, and downstream forwarding. It requires Linux seccomp user notification support, `SECCOMP_USER_NOTIF_FLAG_CONTINUE`, and permission to read the tracee memory through `process_vm_readv()`.
 
+agentsh and Sandlock modes launch each probe through a sandbox command before the MPI compiler wrapper, then collect the detected `nvc++` invocation from `/proc`. They do not use `libseccomp_exec_logger.so`:
+
+```bash
+make ENV=nvhpc MODE=agentsh config_vendor.mk
+make ENV=nvhpc MODE=sandlock config_vendor.mk
+```
+
+By default, agentsh mode prefixes each probe with `agentsh --`, and Sandlock mode prefixes each probe with `sandlock run --`. Override those prefixes when your local sandbox policy needs additional flags:
+
+```bash
+python3 nvcc_config.py --environment nvhpc --mode agentsh \
+  --agentsh-command "agentsh exec SESSION --"
+python3 nvcc_config.py --environment nvhpc --mode sandlock \
+  --sandlock-command "sandlock run -r /usr -r /lib -w /tmp --"
+```
+
 Alternatively, use psutil mode with Python 3.6 and
 the `psutil` module. This mode runs the same compile and link probes, repeatedly
 scans the executing user's process table, detects `nvc++` processes, and reads
@@ -117,7 +133,7 @@ their startup command-line options and environment variables:
 make ENV=nvhpc MODE=psutil PYTHON=python3.6 config_vendor.mk
 ```
 
-Strace, seccomp, and psutil modes run separate compile and link probes through the command configured
+Strace, seccomp, agentsh, Sandlock, and psutil modes run separate compile and link probes through the command configured
 by `MPICXX`, which defaults to `mpicxx -cuda` for NVHPC and `CC` for HPE Cray:
 
 ```text
@@ -125,13 +141,13 @@ unshare -Ur strace -f -v -s 1073741823 -e trace=execve,execveat mpicxx -cuda ...
 ```
 
 Override `MPICXX` when the compiler wrapper needs a different command prefix in
-strace, seccomp, or psutil mode. For example, select a custom NVHPC wrapper with:
+strace, seccomp, agentsh, Sandlock, or psutil mode. For example, select a custom NVHPC wrapper with:
 
 ```bash
 make ENV=nvhpc MODE=strace MPICXX="mpicxx -cuda -gpu=cc80" config_vendor.mk
 ```
 
-psutil mode also accepts `--psutil-poll-interval` through direct invocation of
+agentsh, Sandlock, and psutil modes also accept `--psutil-poll-interval` through direct invocation of
 `nvcc_config.py` to tune the scan interval when short-lived `nvc++` processes are
 hard to catch.
 
@@ -145,8 +161,8 @@ It extracts arguments from detected `nvc++` `execve`/`execveat` calls according
 to `strace-spec.md`, filters probe inputs and NVIDIA wrapper-only options, and
 writes additional `nvc++` environment variables as exported Makefile variables
 using their original names. The host must permit unprivileged `unshare -Ur` and
-provide `strace` for strace mode. seccomp mode does not require `unshare` or `strace`, but it depends on kernel seccomp user notification support and readable tracee memory. psutil mode also does not require `unshare` or `strace`, but it can
-only observe processes visible to the executing user and depends on process
+provide `strace` for strace mode. seccomp mode does not require `unshare` or `strace`, but it depends on kernel seccomp user notification support and readable tracee memory. agentsh and Sandlock modes also do not require `unshare`, `strace`, `libseccomp_exec_logger.so`, or `psutil`, but they require their corresponding sandbox executables. Process-table modes can
+only observe processes visible to the executing user and depend on process
 visibility through `/proc`.
 
 ### HPE Cray Programming Environment
